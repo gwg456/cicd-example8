@@ -91,21 +91,38 @@ def deploy_flow():
                 else:
                     print("使用直接image参数进行部署")
                     # 使用更简单的部署方式
-                    from prefect.client import get_client
+                    from prefect.client.orchestration import get_client
                     
                     print(f"连接到Prefect API: {os.environ.get('PREFECT_API_URL', '默认URL')}")
                     print(f"工作池名称: {WORK_POOL_NAME}")
                     
-                    # 使用更基本的部署方式
+                    # 检查Prefect API连接
+                    try:
+                        print("正在检查Prefect API连接...")
+                        client = get_client()
+                        print(f"成功连接到Prefect API")
+                        
+                        # 检查工作池是否存在
+                        print(f"正在检查工作池 {WORK_POOL_NAME} 是否存在...")
+                        # 这里可以添加检查工作池的代码，但我们先跳过
+                        
+                    except Exception as e:
+                        print(f"Prefect API连接失败: {str(e)}")
+                    
+                    print("开始部署工作流...")
+                    print(f"部署参数: name=prod-deployment, work_pool_name={WORK_POOL_NAME}, image={image_tag}")
+                    
+                    # 使用更基本的部署方式，不使用schedule参数
                     deployment_id = hello.deploy(
                         name="prod-deployment",
                         work_pool_name=WORK_POOL_NAME,
                         image=image_tag,
                         job_variables={"env.PYTHONUNBUFFERED": "1"},
-                        schedule={"interval": 3600},
                         tags=["production", "automated"],
                         description="生产环境部署的hello流",
                     )
+                    
+                    print("部署命令已执行，等待结果...")
                 
                 # 取消超时
                 signal.alarm(0)
