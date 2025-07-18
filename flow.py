@@ -47,24 +47,42 @@ def deploy_flow():
             }
             
             # 使用新的API部署工作流
-            from prefect.infrastructure import DockerContainer
+            # 尝试从不同路径导入Docker容器基础设施
+            try:
+                # 首先尝试prefect-docker包
+                from prefect_docker.containers import DockerContainer
+                
+                # 创建Docker容器基础设施
+                docker_infrastructure = DockerContainer(
+                    image=image_tag,
+                    env=env_vars,
+                    network_mode="host",
+                )
+            except ImportError:
+                # 如果失败，则使用通用基础设施
+                print("无法导入DockerContainer，使用默认基础设施配置")
+                docker_infrastructure = None
             
-            # 创建Docker容器基础设施
-            docker_infrastructure = DockerContainer(
-                image=image_tag,
-                env=env_vars,
-                network_mode="host",
-            )
-            
-            # 使用新的deploy方法
-            deployment_id = hello.deploy(
-                name="prod-deployment",
-                work_pool_name=WORK_POOL_NAME,
-                infrastructure=docker_infrastructure,
-                schedule={"interval": 3600},
-                tags=["production", "automated"],
-                description="生产环境部署的hello流",
-            )
+            # 使用新的deploy方法，根据是否有docker_infrastructure决定参数
+            if docker_infrastructure:
+                deployment_id = hello.deploy(
+                    name="prod-deployment",
+                    work_pool_name=WORK_POOL_NAME,
+                    infrastructure=docker_infrastructure,
+                    schedule={"interval": 3600},
+                    tags=["production", "automated"],
+                    description="生产环境部署的hello流",
+                )
+            else:
+                # 直接使用image参数
+                deployment_id = hello.deploy(
+                    name="prod-deployment",
+                    work_pool_name=WORK_POOL_NAME,
+                    image=image_tag,
+                    schedule={"interval": 3600},
+                    tags=["production", "automated"],
+                    description="生产环境部署的hello流",
+                )
             
             print(f"部署ID: {deployment_id}")
         else:
