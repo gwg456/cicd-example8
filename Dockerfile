@@ -10,4 +10,4 @@ COPY flow.py .
 ENV PYTHONUNBUFFERED=1
 ENV PREFECT_LOGGING_LEVEL=INFO
 
-CMD ["python", "flow.py"]'
+CMD ["python", "flow.py"]
