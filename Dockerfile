@@ -2,8 +2,11 @@ FROM registry.cn-beijing.aliyuncs.com/moseeker/python:3.12-slim
 
 WORKDIR /app
 
-# 安装Docker CLI
-RUN apt-get update && \
+# 配置阿里云源并安装Docker CLI
+RUN echo "deb https://mirrors.aliyun.com/debian/ bookworm main contrib non-free" > /etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian/ bookworm-updates main contrib non-free" >> /etc/apt/sources.list && \
+    echo "deb https://mirrors.aliyun.com/debian-security bookworm-security main contrib non-free" >> /etc/apt/sources.list && \
+    apt-get update && \
     apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
