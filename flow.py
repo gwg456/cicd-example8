@@ -35,9 +35,7 @@ def deploy_flow():
         in_container = os.path.exists("/.dockerenv")
         
         if in_container:
-            # 在容器内使用远程存储部署
-            from prefect.deployments import Deployment
-            
+            # 在容器内使用新的API进行部署
             # 基本环境变量
             env_vars = {
                 "LOG_LEVEL": "INFO",
@@ -48,25 +46,26 @@ def deploy_flow():
                 "PREFECT_API_REQUEST_TIMEOUT": "300",
             }
             
-            # 创建部署而不构建镜像
-            deployment = Deployment.build_from_flow(
-                flow=hello,
+            # 使用新的API部署工作流
+            from prefect.infrastructure import DockerContainer
+            
+            # 创建Docker容器基础设施
+            docker_infrastructure = DockerContainer(
+                image=image_tag,
+                env=env_vars,
+                network_mode="host",
+            )
+            
+            # 使用新的deploy方法
+            deployment_id = hello.deploy(
                 name="prod-deployment",
-                version=os.environ.get("IMAGE_TAG", "latest"),
                 work_pool_name=WORK_POOL_NAME,
+                infrastructure=docker_infrastructure,
                 schedule={"interval": 3600},
                 tags=["production", "automated"],
                 description="生产环境部署的hello流",
-                infrastructure_document={
-                    "type": "docker-container",
-                    "env": env_vars,
-                    "image": image_tag,
-                    "network_mode": "host",
-                }
             )
             
-            # 应用部署
-            deployment_id = deployment.apply()
             print(f"部署ID: {deployment_id}")
         else:
             # 创建临时日志目录以避免I/O错误
