@@ -31,35 +31,73 @@ def deploy_flow():
         
         print(f"正在部署镜像: {image_tag}")
         
-        # 创建临时日志目录以避免I/O错误
-        temp_log_dir = tempfile.mkdtemp(prefix="prefect_logs_")
+        # 检查是否在容器内部署
+        in_container = os.path.exists("/.dockerenv")
         
-        # 配置Docker环境变量和选项
-        docker_env = {
-            "env.LOG_LEVEL": "INFO",
-            "env.ENVIRONMENT": "production",
-            "env.PYTHONUNBUFFERED": "1",
-            "env.DOCKER_CLIENT_TIMEOUT": "300",
-            "env.COMPOSE_HTTP_TIMEOUT": "300",
-            "env.PREFECT_LOGGING_LEVEL": "INFO",
-            "env.PREFECT_API_RESPONSE_TIMEOUT": "300",
-            "env.PREFECT_API_REQUEST_TIMEOUT": "300",
-            "env.PREFECT_DOCKER_HOST_NETWORK": "true",
-            "env.PREFECT_DOCKER_VOLUME_MOUNTS": f"{temp_log_dir}:/tmp/prefect/logs",
-            "env.PREFECT_DOCKER_NETWORK": "host"
-        }
-        
-        # 使用更稳健的部署配置
-        hello.deploy(
-            name="prod-deployment",
-            work_pool_name=WORK_POOL_NAME,
-            image=image_tag,
-            schedule={"interval": 3600},
-            description="生产环境部署的hello流",
-            tags=["production", "automated"],
-            job_variables=docker_env,
-            concurrency_limit=2
-        )
+        if in_container:
+            # 在容器内使用远程存储部署
+            from prefect.deployments import Deployment
+            
+            # 基本环境变量
+            env_vars = {
+                "LOG_LEVEL": "INFO",
+                "ENVIRONMENT": "production",
+                "PYTHONUNBUFFERED": "1",
+                "PREFECT_LOGGING_LEVEL": "INFO",
+                "PREFECT_API_RESPONSE_TIMEOUT": "300",
+                "PREFECT_API_REQUEST_TIMEOUT": "300",
+            }
+            
+            # 创建部署而不构建镜像
+            deployment = Deployment.build_from_flow(
+                flow=hello,
+                name="prod-deployment",
+                version=os.environ.get("IMAGE_TAG", "latest"),
+                work_pool_name=WORK_POOL_NAME,
+                schedule={"interval": 3600},
+                tags=["production", "automated"],
+                description="生产环境部署的hello流",
+                infrastructure_document={
+                    "type": "docker-container",
+                    "env": env_vars,
+                    "image": image_tag,
+                    "network_mode": "host",
+                }
+            )
+            
+            # 应用部署
+            deployment_id = deployment.apply()
+            print(f"部署ID: {deployment_id}")
+        else:
+            # 创建临时日志目录以避免I/O错误
+            temp_log_dir = tempfile.mkdtemp(prefix="prefect_logs_")
+            
+            # 配置Docker环境变量和选项
+            docker_env = {
+                "env.LOG_LEVEL": "INFO",
+                "env.ENVIRONMENT": "production",
+                "env.PYTHONUNBUFFERED": "1",
+                "env.DOCKER_CLIENT_TIMEOUT": "300",
+                "env.COMPOSE_HTTP_TIMEOUT": "300",
+                "env.PREFECT_LOGGING_LEVEL": "INFO",
+                "env.PREFECT_API_RESPONSE_TIMEOUT": "300",
+                "env.PREFECT_API_REQUEST_TIMEOUT": "300",
+                "env.PREFECT_DOCKER_HOST_NETWORK": "true",
+                "env.PREFECT_DOCKER_VOLUME_MOUNTS": f"{temp_log_dir}:/tmp/prefect/logs",
+                "env.PREFECT_DOCKER_NETWORK": "host"
+            }
+            
+            # 使用更稳健的部署配置
+            hello.deploy(
+                name="prod-deployment",
+                work_pool_name=WORK_POOL_NAME,
+                image=image_tag,
+                schedule={"interval": 3600},
+                description="生产环境部署的hello流",
+                tags=["production", "automated"],
+                job_variables=docker_env,
+                concurrency_limit=2
+            )
         
         print(f"部署已完成，版本: {image_tag}")
         

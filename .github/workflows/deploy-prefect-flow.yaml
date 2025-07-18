@@ -43,11 +43,12 @@ jobs:
 
       - name: Deploy using the built image
         run: |
-          # 直接使用已构建的镜像执行部署
+          # 直接使用已构建的镜像执行部署，挂载Docker套接字
           docker run --rm \
             -e PREFECT_API_URL=${{ secrets.PREFECT_API_URL }} \
             -e IMAGE_REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             -e IMAGE_TAG=${{ steps.version.outputs.VERSION }} \
             -e WORK_POOL_NAME=my-docker-pool2 \
             -e DEPLOY_MODE=true \
+            -v /var/run/docker.sock:/var/run/docker.sock \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
