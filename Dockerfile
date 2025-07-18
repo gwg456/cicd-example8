@@ -2,10 +2,8 @@ FROM registry.cn-beijing.aliyuncs.com/moseeker/python:3.12-slim
 
 WORKDIR /app
 
-# 替换为阿里云源并安装Docker CLI
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list && \
-    apt-get update && \
+# 安装Docker CLI
+RUN apt-get update && \
     apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release && \
     mkdir -p /etc/apt/keyrings && \
     curl -fsSL https://mirrors.aliyun.com/docker-ce/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
