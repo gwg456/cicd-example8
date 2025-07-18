@@ -1,0 +1,62 @@
+name: Deploy Prefect flow
+
+on:
+  push:
+    branches:
+      - main
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: samples28/cicd-example
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.citoken }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate version tag
+        id: version
+        run: |
+          echo "VERSION=v$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create deployment container
+        run: |
+          # 创建临时Dockerfile用于部署
+          cat > Dockerfile.deploy << EOF
+          FROM python:3.12-slim
+          WORKDIR /app
+          COPY flow.py /app/
+          COPY requirements.txt /app/
+          RUN pip install -r requirements.txt
+          ENV PREFECT_API_URL=${{ secrets.PREFECT_API_URL }}
+          ENV IMAGE_REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          ENV IMAGE_TAG=${{ steps.version.outputs.VERSION }}
+          ENV WORK_POOL_NAME=my-docker-pool2
+          CMD ["python", "flow.py"]
+          EOF
+          
+          # 构建并运行部署容器
+          docker build -t deploy-container -f Dockerfile.deploy .
+          docker run --rm deploy-container
