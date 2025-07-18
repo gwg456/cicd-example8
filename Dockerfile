@@ -1,9 +1,9 @@
 FROM registry.cn-beijing.aliyuncs.com/moseeker/python:3.12-slim
-ENV PREFECT_API_URL=http://172.31.0.55:4200/api
+
 WORKDIR /app
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
 
 COPY flow.py .
 
