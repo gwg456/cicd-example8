@@ -73,4 +73,7 @@ def deploy_flow():
         raise
 
 if __name__ == "__main__":
-    deploy_flow()
+    if os.environ.get("DEPLOY_MODE", "false").lower() == "true":
+        deploy_flow()
+    else:
+        hello()

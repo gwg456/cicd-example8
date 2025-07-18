@@ -41,23 +41,13 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Create deployment container
+      - name: Deploy using the built image
         run: |
-          # 创建临时Dockerfile用于部署
-          cat > Dockerfile.deploy << EOF
-          FROM registry.cn-beijing.aliyuncs.com/moseeker/python:3.12-slim
-          WORKDIR /app
-          COPY flow.py /app/
-          COPY requirements.txt /app/
-          RUN pip install --upgrade pip
-          RUN pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple/ --trusted-host mirrors.aliyun.com
-          ENV PREFECT_API_URL=${{ secrets.PREFECT_API_URL }}
-          ENV IMAGE_REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          ENV IMAGE_TAG=${{ steps.version.outputs.VERSION }}
-          ENV WORK_POOL_NAME=my-docker-pool2
-          CMD ["python", "flow.py"]
-          EOF
-          
-          # 构建并运行部署容器
-          docker build -t deploy-container -f Dockerfile.deploy .
-          docker run --rm deploy-container
+          # 直接使用已构建的镜像执行部署
+          docker run --rm \
+            -e PREFECT_API_URL=${{ secrets.PREFECT_API_URL }} \
+            -e IMAGE_REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+            -e IMAGE_TAG=${{ steps.version.outputs.VERSION }} \
+            -e WORK_POOL_NAME=my-docker-pool2 \
+            -e DEPLOY_MODE=true \
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
