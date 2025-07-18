@@ -63,26 +63,58 @@ def deploy_flow():
                 print("无法导入DockerContainer，使用默认基础设施配置")
                 docker_infrastructure = None
             
-            # 使用新的deploy方法，根据是否有docker_infrastructure决定参数
-            if docker_infrastructure:
-                deployment_id = hello.deploy(
-                    name="prod-deployment",
-                    work_pool_name=WORK_POOL_NAME,
-                    infrastructure=docker_infrastructure,
-                    schedule={"interval": 3600},
-                    tags=["production", "automated"],
-                    description="生产环境部署的hello流",
-                )
-            else:
-                # 直接使用image参数
-                deployment_id = hello.deploy(
-                    name="prod-deployment",
-                    work_pool_name=WORK_POOL_NAME,
-                    image=image_tag,
-                    schedule={"interval": 3600},
-                    tags=["production", "automated"],
-                    description="生产环境部署的hello流",
-                )
+            import signal
+            
+            # 定义超时处理函数
+            def timeout_handler(signum, frame):
+                print("部署操作超时，可能是网络问题或Prefect服务器无响应")
+                raise TimeoutError("部署操作超时")
+            
+            # 设置60秒超时
+            signal.signal(signal.SIGALRM, timeout_handler)
+            signal.alarm(60)
+            
+            try:
+                print("开始部署流程...")
+                
+                # 使用新的deploy方法，根据是否有docker_infrastructure决定参数
+                if docker_infrastructure:
+                    print("使用DockerContainer基础设施进行部署")
+                    deployment_id = hello.deploy(
+                        name="prod-deployment",
+                        work_pool_name=WORK_POOL_NAME,
+                        infrastructure=docker_infrastructure,
+                        schedule={"interval": 3600},
+                        tags=["production", "automated"],
+                        description="生产环境部署的hello流",
+                    )
+                else:
+                    print("使用直接image参数进行部署")
+                    # 使用更简单的部署方式
+                    from prefect.client import get_client
+                    
+                    print(f"连接到Prefect API: {os.environ.get('PREFECT_API_URL', '默认URL')}")
+                    print(f"工作池名称: {WORK_POOL_NAME}")
+                    
+                    # 使用更基本的部署方式
+                    deployment_id = hello.deploy(
+                        name="prod-deployment",
+                        work_pool_name=WORK_POOL_NAME,
+                        image=image_tag,
+                        job_variables={"env.PYTHONUNBUFFERED": "1"},
+                        schedule={"interval": 3600},
+                        tags=["production", "automated"],
+                        description="生产环境部署的hello流",
+                    )
+                
+                # 取消超时
+                signal.alarm(0)
+                
+            except Exception as e:
+                # 取消超时
+                signal.alarm(0)
+                print(f"部署过程中发生错误: {str(e)}")
+                raise
             
             print(f"部署ID: {deployment_id}")
         else:
