@@ -12,10 +12,30 @@ jobs:
   deploy:
     name: Deploy
     runs-on: self-hosted
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Configure Docker daemon for China mainland
+        run: |
+          # 配置Docker镜像加速器
+          sudo mkdir -p /etc/docker
+          echo '{
+            "registry-mirrors": [
+              "https://hub-mirror.c.163.com",
+              "https://mirror.ccs.tencentyun.com",
+              "https://docker.mirrors.ustc.edu.cn"
+            ],
+            "max-concurrent-downloads": 10,
+            "max-concurrent-uploads": 5,
+            "max-download-attempts": 5
+          }' | sudo tee /etc/docker/daemon.json
+          sudo systemctl restart docker
+          # 等待Docker重启完成
+          sleep 10
+          docker info
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -24,8 +44,15 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.citoken }}
 
-      - name: Set up Docker Buildx
+      - name: Set up Docker Buildx (inherit daemon config)
         uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+          driver-opts: |
+            default-load=true
+          buildkitd-flags: |
+            --allow-insecure-entitlement security.insecure
+            --allow-insecure-entitlement network.host
 
       - name: Generate version tag
         id: version
@@ -40,6 +67,10 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          network: host
+          load: true
+        timeout-minutes: 20
 
       - name: Deploy using the built image
         run: |
@@ -52,3 +83,4 @@ jobs:
             -e DEPLOY_MODE=true \
             -v /var/run/docker.sock:/var/run/docker.sock \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+        timeout-minutes: 10
