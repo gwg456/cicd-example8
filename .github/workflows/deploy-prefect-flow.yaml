@@ -26,45 +26,22 @@ jobs:
           echo "📋 当前配置:"
           tail -10 /etc/hosts
 
-      - name: Extract Docker Hub hosts entries
+      - name: Extract Docker Hub hosts for container build
         run: |
-          # 提取Docker Hub相关的hosts条目
-          echo "提取Docker Hub hosts配置..."
-          grep -E "(docker\.io|docker\.com)" /etc/hosts > docker-hub-hosts.txt || true
-          echo "Docker Hub hosts entries:"
-          cat docker-hub-hosts.txt || echo "No Docker Hub entries found"
+          # 提取Docker Hub相关的hosts条目，传递给容器构建
+          chmod +x scripts/extract-docker-hosts.sh
+          ./scripts/extract-docker-hosts.sh
           
-          # 创建构建时用的hosts文件
-          echo "# Docker Hub hosts for container build" > build-hosts.txt
-          cat docker-hub-hosts.txt >> build-hosts.txt || true
-          echo "Build hosts file content:"
-          cat build-hosts.txt
-
-      - name: Configure Docker daemon for China mainland
-        run: |
-          # 配置Docker镜像加速器
-          sudo mkdir -p /etc/docker
-          echo '{
-            "registry-mirrors": [
-              "https://hub-mirror.c.163.com",
-              "https://mirror.ccs.tencentyun.com",
-              "https://docker.mirrors.ustc.edu.cn"
-            ],
-            "max-concurrent-downloads": 10,
-            "max-concurrent-uploads": 5,
-            "max-download-attempts": 5
-          }' | sudo tee /etc/docker/daemon.json
-          sudo systemctl restart docker
-          # 等待Docker重启完成
-          sleep 10
-          docker info
+          # 创建用于构建的add-hosts参数
+          echo "DOCKER_ADD_HOSTS<<EOF" >> $GITHUB_ENV
+          cat docker-add-hosts.txt >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: Test Docker Hub connectivity
         run: |
           # 测试Docker Hub连接性
           echo "Testing Docker Hub connectivity..."
           curl -I https://registry-1.docker.io/v2/ || echo "Direct connection failed"
-          curl -I https://hub-mirror.c.163.com/ || echo "Mirror connection failed"
           # 测试域名解析
           nslookup registry-1.docker.io
           ping -c 3 registry-1.docker.io || echo "Ping failed but continuing..."
@@ -117,7 +94,7 @@ jobs:
 
       - name: Deploy using the built image
         run: |
-          # 直接使用已构建的镜像执行部署，挂载Docker套接字
+          # 直接使用已构建的镜像执行部署，传递hosts配置
           docker run --rm \
             -e PREFECT_API_URL=${{ secrets.PREFECT_API_URL }} \
             -e IMAGE_REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
@@ -127,5 +104,7 @@ jobs:
             -v /var/run/docker.sock:/var/run/docker.sock \
             --add-host registry-1.docker.io:52.4.71.198 \
             --add-host auth.docker.io:54.85.56.253 \
+            --add-host production.cloudflare.docker.com:52.72.232.213 \
+            --add-host index.docker.io:52.1.38.175 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
         timeout-minutes: 10

@@ -93,7 +93,7 @@ DEPLOY_MODE=true python flow.py
    sudo systemctl restart docker
    ```
 
-3. **配置镜像加速器**: 参考 `docker-mirror-setup.md`
+详细配置说明请参考 `docker-mirror-setup.md`
 
 ```bash
 # 构建镜像（简化版，推荐）
