@@ -41,6 +41,41 @@ jobs:
           echo "📋 当前hosts文件末尾10行:"
           sudo tail -10 /etc/hosts
 
+      - name: Restart Docker to apply hosts changes
+        run: |
+          # 重启Docker daemon以应用hosts配置变化
+          echo "🔄 重启Docker daemon以应用hosts配置..."
+          sudo systemctl restart docker
+          
+          # 等待Docker重启完成
+          echo "⏳ 等待Docker重启完成..."
+          sleep 10
+          
+          # 验证Docker状态
+          docker info
+          echo "✅ Docker重启完成"
+
+      - name: Test Docker Hub connectivity from build context
+        run: |
+          # 测试Docker构建上下文的连接性
+          echo "🧪 测试Docker构建上下文的Docker Hub访问..."
+          
+          # 测试宿主机连接
+          echo "📡 宿主机连接测试:"
+          nslookup registry-1.docker.io || echo "nslookup failed"
+          ping -c 3 registry-1.docker.io || echo "Ping failed but continuing..."
+          curl -I --connect-timeout 10 https://registry-1.docker.io/v2/ || echo "HTTP connection failed"
+          
+          # 测试Docker daemon能否拉取镜像
+          echo "🐳 测试Docker daemon拉取能力:"
+          if docker pull alpine:latest; then
+            echo "✅ Docker Hub访问正常，使用标准Dockerfile"
+            echo "BUILD_METHOD=standard" >> $GITHUB_ENV
+          else
+            echo "❌ Docker Hub访问失败，将使用中国网络优化版Dockerfile"
+            echo "BUILD_METHOD=china" >> $GITHUB_ENV
+          fi
+
       - name: Create container hosts file
         run: |
           # 创建容器专用的hosts文件
@@ -76,14 +111,9 @@ jobs:
             echo "📋 提取的配置:"
             cat docker-add-hosts.txt
             
-            # 创建GitHub Actions环境变量格式
+            # 创建GitHub Actions环境变量格式 (用于buildx add-hosts)
             echo "DOCKER_ADD_HOSTS<<EOF" >> $GITHUB_ENV
             cat docker-add-hosts.txt | sed 's/:/ /' >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
-            
-            # 创建docker run时使用的add-host参数
-            echo "DOCKER_RUN_HOSTS<<EOF" >> $GITHUB_ENV
-            cat docker-add-hosts.txt | sed 's/^/--add-host /' >> $GITHUB_ENV
             echo "EOF" >> $GITHUB_ENV
             
           else
@@ -96,40 +126,7 @@ jobs:
             echo "index.docker.io 52.1.38.175" >> $GITHUB_ENV
             echo "registry.docker.io 52.4.71.198" >> $GITHUB_ENV
             echo "EOF" >> $GITHUB_ENV
-            
-            echo "DOCKER_RUN_HOSTS<<EOF" >> $GITHUB_ENV
-            echo "--add-host registry-1.docker.io:52.4.71.198" >> $GITHUB_ENV
-            echo "--add-host auth.docker.io:54.85.56.253" >> $GITHUB_ENV
-            echo "--add-host production.cloudflare.docker.com:52.72.232.213" >> $GITHUB_ENV
-            echo "--add-host index.docker.io:52.1.38.175" >> $GITHUB_ENV
-            echo "--add-host registry.docker.io:52.4.71.198" >> $GITHUB_ENV
-            echo "EOF" >> $GITHUB_ENV
           fi
-
-      - name: Test Docker Hub connectivity
-        run: |
-          # 测试Docker Hub连接性
-          echo "🧪 Testing Docker Hub connectivity..."
-          
-          # 测试域名解析
-          echo "📡 测试域名解析:"
-          nslookup registry-1.docker.io || echo "nslookup failed"
-          
-          # 测试ping连接
-          echo "🏓 测试ping连接:"
-          ping -c 3 registry-1.docker.io || echo "Ping failed but continuing..."
-          
-          # 测试HTTP连接
-          echo "🌐 测试HTTP连接:"
-          curl -I --connect-timeout 10 https://registry-1.docker.io/v2/ || echo "HTTP connection failed"
-          
-          # 测试容器内访问（使用hosts文件挂载）
-          echo "🐳 测试容器内DNS解析（挂载hosts文件）:"
-          docker run --rm -v $(pwd)/container-hosts:/etc/hosts alpine:latest nslookup registry-1.docker.io || echo "Container hosts file test failed"
-          
-          # 测试容器内访问（使用add-host参数）
-          echo "🐳 测试容器内DNS解析（add-host参数）:"
-          docker run --rm ${{ env.DOCKER_RUN_HOSTS }} alpine:latest nslookup registry-1.docker.io || echo "Container add-host test failed"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -138,12 +135,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.citoken }}
 
-      - name: Set up Docker Buildx (inherit daemon config)
+      - name: Set up Docker Buildx (with network host access)
         uses: docker/setup-buildx-action@v3
         with:
           driver: docker
+          use: true
           driver-opts: |
-            default-load=true
+            network=host
           buildkitd-flags: |
             --allow-insecure-entitlement security.insecure
             --allow-insecure-entitlement network.host
@@ -153,10 +151,12 @@ jobs:
         run: |
           echo "VERSION=v$(date +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
 
-      - name: Build and push Docker image
+      - name: Build and push Docker image (Standard)
+        if: env.BUILD_METHOD == 'standard'
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ./Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
           cache-from: type=gha
@@ -172,15 +172,35 @@ jobs:
           add-hosts: ${{ env.DOCKER_ADD_HOSTS }}
         timeout-minutes: 20
 
+      - name: Build and push Docker image (China Network Optimized)
+        if: env.BUILD_METHOD == 'china'
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.china
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          network: host
+          load: true
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+          allow: |
+            network.host
+            security.insecure
+        timeout-minutes: 20
+
       - name: Deploy using the built image
         run: |
-          # 输出将要使用的hosts配置
-          echo "🔧 使用的Docker hosts配置方案:"
-          echo "方案1: 挂载hosts文件"
-          echo "方案2: 使用add-host参数: ${{ env.DOCKER_RUN_HOSTS }}"
+          # 输出将要使用的hosts配置方案
+          echo "🔧 使用挂载hosts文件方式运行容器..."
+          echo "📋 构建方法: ${{ env.BUILD_METHOD }}"
+          echo "📋 容器hosts文件内容:"
+          cat container-hosts | grep -E "(docker|localhost)"
           
-          # 方案1: 挂载容器专用hosts文件（推荐）
-          echo "🚀 使用挂载hosts文件方式运行容器..."
+          # 使用挂载容器专用hosts文件方式运行
           docker run --rm \
             -v $(pwd)/container-hosts:/etc/hosts \
             -e PREFECT_API_URL=${{ secrets.PREFECT_API_URL }} \
