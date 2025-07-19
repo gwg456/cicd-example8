@@ -1,0 +1,135 @@
+# MySQL 审计解决方案依赖包
+
+# 数据库连接
+PyMySQL==1.1.0
+mysql-connector-python==8.2.0
+SQLAlchemy==2.0.23
+
+# 日志解析
+python-dateutil==2.8.2
+pymongo==4.6.0
+
+# Web框架
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-RESTful==0.3.10
+Flask-CORS==4.0.0
+Flask-JWT-Extended==4.6.0
+
+# 数据处理
+pandas==2.1.4
+numpy==1.24.4
+
+# 配置管理
+PyYAML==6.0.1
+configparser==6.0.0
+
+# 日志记录
+loguru==0.7.2
+
+# 加密
+cryptography==41.0.8
+bcrypt==4.1.2
+
+# 任务调度
+APScheduler==3.10.4
+celery==5.3.4
+redis==5.0.1
+
+# 邮件发送
+smtplib2==0.2.1
+
+# HTTP客户端
+requests==2.31.0
+urllib3==2.1.0
+
+# 时间处理
+pytz==2023.3.post1
+
+# JSON处理
+simplejson==3.19.2
+
+# 正则表达式增强
+regex==2023.10.3
+
+# 系统监控
+psutil==5.9.6
+
+# 文件监控
+watchdog==3.0.0
+
+# Excel处理
+openpyxl==3.1.2
+xlsxwriter==3.1.9
+
+# PDF生成
+reportlab==4.0.7
+
+# 图表生成
+matplotlib==3.8.2
+plotly==5.17.0
+
+# Elasticsearch (可选)
+elasticsearch==8.11.0
+
+# 消息队列 (可选)
+pika==1.3.2
+
+# 开发和测试
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.11.0
+flake8==6.1.0
+
+# 部署相关
+gunicorn==21.2.0
+uwsgi==2.0.23
+
+# 监控集成
+prometheus-client==0.19.0
+
+# 分布式锁
+py-zookeeper==0.4.2
+
+# 缓存
+python-memcached==1.62
+
+# 序列化
+pickle-mixin==1.0.2
+
+# 多进程
+multiprocessing-logging==0.3.4
+
+# 文档生成
+Sphinx==7.2.6
+
+# 类型检查
+mypy==1.7.1
+
+# 环境变量
+python-dotenv==1.0.0
+
+# 国际化
+Babel==2.13.1
+
+# 模板引擎
+Jinja2==3.1.2
+
+# 静态文件服务
+Werkzeug==3.0.1
+
+# 数据验证
+marshmallow==3.20.1
+
+# API文档
+flask-apispec==0.11.4
+apispec==6.3.0
+
+# 分页
+Flask-SQLAlchemy-Paginate==1.0.2
+
+# 限流
+Flask-Limiter==3.5.0
+
+# 健康检查
+Flask-HealthCheck==1.0.2
