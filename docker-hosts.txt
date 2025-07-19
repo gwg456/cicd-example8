@@ -1,0 +1,25 @@
+# Docker Hub域名IP映射配置
+# 复制以下内容到 /etc/hosts 文件末尾，或使用脚本自动配置
+# 使用方法: sudo cat docker-hosts.txt >> /etc/hosts
+
+# Docker Hub mirror configuration (updated 2025-01-19)
+52.4.71.198     registry-1.docker.io
+54.85.56.253    auth.docker.io  
+52.72.232.213   production.cloudflare.docker.com
+52.1.38.175     index.docker.io
+52.4.71.198     registry.docker.io
+18.232.227.119  docker.io
+3.211.234.87    hub.docker.com
+# End Docker Hub configuration
+
+# 使用说明:
+# 1. 这些IP地址可能会变化，建议定期更新
+# 2. 可以使用 nslookup registry-1.docker.io 8.8.8.8 获取最新IP
+# 3. 配置后重启Docker服务: sudo systemctl restart docker
+# 4. 测试连接: ping registry-1.docker.io
+
+# 备选方案:
+# 如果上述IP不可用，可尝试以下操作:
+# 1. 配置Docker镜像加速器
+# 2. 使用国内镜像源 (如网易、阿里云等)
+# 3. 运行 scripts/update-docker-hosts.sh 自动更新

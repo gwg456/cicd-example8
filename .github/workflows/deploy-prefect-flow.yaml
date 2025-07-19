@@ -18,6 +18,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Configure hosts for Docker Hub access
+        run: |
+          # 配置Docker Hub域名解析，使用预设的IP地址
+          sudo cat docker-hosts.txt >> /etc/hosts
+          echo "✅ Docker Hub域名配置完成"
+          echo "📋 当前配置:"
+          tail -10 /etc/hosts
+
       - name: Configure Docker daemon for China mainland
         run: |
           # 配置Docker镜像加速器
@@ -36,6 +44,16 @@ jobs:
           # 等待Docker重启完成
           sleep 10
           docker info
+
+      - name: Test Docker Hub connectivity
+        run: |
+          # 测试Docker Hub连接性
+          echo "Testing Docker Hub connectivity..."
+          curl -I https://registry-1.docker.io/v2/ || echo "Direct connection failed"
+          curl -I https://hub-mirror.c.163.com/ || echo "Mirror connection failed"
+          # 测试域名解析
+          nslookup registry-1.docker.io
+          ping -c 3 registry-1.docker.io || echo "Ping failed but continuing..."
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3

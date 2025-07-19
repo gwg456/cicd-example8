@@ -75,7 +75,25 @@ DEPLOY_MODE=true python flow.py
 - `Dockerfile`: 简化版本，体积更小，推荐使用
 - `Dockerfile.with-docker`: 包含Docker CLI，如果需要在容器内操作Docker时使用
 
-**注意**: 如果在中国大陆地区构建遇到网络问题，请参考 `docker-mirror-setup.md` 配置Docker镜像加速器。
+**注意**: 如果在中国大陆地区构建遇到网络问题，请使用以下解决方案：
+
+### 🚀 快速解决方案
+
+1. **自动配置hosts**（推荐）:
+   ```bash
+   # 运行自动配置脚本
+   sudo chmod +x scripts/update-docker-hosts.sh
+   sudo ./scripts/update-docker-hosts.sh
+   ```
+
+2. **手动配置hosts**:
+   ```bash
+   # 添加Docker Hub IP映射
+   sudo cat docker-hosts.txt >> /etc/hosts
+   sudo systemctl restart docker
+   ```
+
+3. **配置镜像加速器**: 参考 `docker-mirror-setup.md`
 
 ```bash
 # 构建镜像（简化版，推荐）
@@ -110,7 +128,10 @@ cicd-example/
 ├── config.py                         # 配置管理文件
 ├── Dockerfile                        # Docker 镜像配置（简化版）
 ├── Dockerfile.with-docker            # Docker 镜像配置（包含Docker CLI）
+├── docker-hosts.txt                  # Docker Hub域名IP映射文件
 ├── docker-mirror-setup.md            # Docker镜像加速器配置指南
+├── scripts/
+│   └── update-docker-hosts.sh        # 自动更新Docker Hub IP脚本
 ├── pip.conf                          # pip清华源配置
 ├── requirements.txt                  # Python 依赖
 ├── Makefile                          # 构建命令
