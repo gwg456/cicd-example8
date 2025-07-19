@@ -1,0 +1,53 @@
+# MySQL 数据库变更监控系统依赖
+
+# 数据库连接
+PyMySQL==1.1.0
+mysql-connector-python==8.2.0
+
+# Binary Log解析
+mysql-replication==0.45
+
+# Web框架
+Flask==3.0.0
+Flask-SQLAlchemy==3.1.1
+Flask-CORS==4.0.0
+
+# 配置管理
+PyYAML==6.0.1
+
+# 日志记录
+loguru==0.7.2
+
+# 时间处理
+python-dateutil==2.8.2
+
+# 邮件发送
+smtplib2==0.2.1
+
+# HTTP客户端
+requests==2.31.0
+
+# JSON处理
+simplejson==3.19.2
+
+# 文件监控
+watchdog==3.0.0
+
+# 任务调度
+APScheduler==3.10.4
+
+# 数据处理
+pandas==2.1.4
+
+# 可视化图表
+plotly==5.17.0
+
+# 开发工具
+pytest==7.4.3
+black==23.11.0
+
+# 部署相关
+gunicorn==21.2.0
+
+# 环境变量
+python-dotenv==1.0.0
