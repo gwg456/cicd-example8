@@ -1,135 +1,64 @@
-# MySQL 审计解决方案依赖包
+# ===============================
+# MySQL 审计解决方案 Python 依赖
+# 兼容 MySQL 5.6, 5.7, 8.0
+# ===============================
 
-# 数据库连接
-PyMySQL==1.1.0
-mysql-connector-python==8.2.0
-SQLAlchemy==2.0.23
+# 核心依赖
+PyYAML>=5.4.1,<7.0
+loguru>=0.6.0,<1.0
+watchdog>=2.1.0,<4.0
 
-# 日志解析
-python-dateutil==2.8.2
-pymongo==4.6.0
-
-# Web框架
-Flask==3.0.0
-Flask-SQLAlchemy==3.1.1
-Flask-RESTful==0.3.10
-Flask-CORS==4.0.0
-Flask-JWT-Extended==4.6.0
-
-# 数据处理
-pandas==2.1.4
-numpy==1.24.4
+# MySQL 连接器 (兼容 MySQL 5.6+)
+PyMySQL>=1.0.2,<2.0
+# 备选方案，如果需要更好的性能
+# mysql-connector-python>=8.0.32,<9.0
 
 # 配置管理
-PyYAML==6.0.1
-configparser==6.0.0
+configparser>=5.2.0
+python-dotenv>=0.19.0,<2.0
 
-# 日志记录
-loguru==0.7.2
+# 邮件支持
+smtplib2>=0.2.1
 
-# 加密
-cryptography==41.0.8
-bcrypt==4.1.2
+# HTTP 请求 (用于 webhook)
+requests>=2.25.0,<3.0
+urllib3>=1.26.0,<2.0
 
-# 任务调度
-APScheduler==3.10.4
-celery==5.3.4
-redis==5.0.1
+# 日期时间处理
+python-dateutil>=2.8.0,<3.0
 
-# 邮件发送
-smtplib2==0.2.1
-
-# HTTP客户端
-requests==2.31.0
-urllib3==2.1.0
-
-# 时间处理
-pytz==2023.3.post1
-
-# JSON处理
-simplejson==3.19.2
+# JSON 处理增强
+simplejson>=3.17.0,<4.0
 
 # 正则表达式增强
-regex==2023.10.3
+regex>=2021.8.3,<2024.0
 
 # 系统监控
-psutil==5.9.6
+psutil>=5.8.0,<6.0
 
-# 文件监控
-watchdog==3.0.0
+# 文件处理
+pathlib2>=2.3.6; python_version < "3.4"
 
-# Excel处理
-openpyxl==3.1.2
-xlsxwriter==3.1.9
+# 并发处理
+concurrent-futures>=3.1.1; python_version < "3.2"
 
-# PDF生成
-reportlab==4.0.7
+# 类型检查支持
+typing-extensions>=4.0.0; python_version < "3.8"
 
-# 图表生成
-matplotlib==3.8.2
-plotly==5.17.0
+# 加密支持
+cryptography>=3.4.8,<42.0
 
-# Elasticsearch (可选)
-elasticsearch==8.11.0
+# CSV 处理增强
+unicodecsv>=0.14.1
 
-# 消息队列 (可选)
-pika==1.3.2
+# 网络工具
+netifaces>=0.11.0
 
-# 开发和测试
-pytest==7.4.3
-pytest-cov==4.1.0
-black==23.11.0
-flake8==6.1.0
+# 系统服务支持
+python-daemon>=2.3.0,<3.0
 
-# 部署相关
-gunicorn==21.2.0
-uwsgi==2.0.23
-
-# 监控集成
-prometheus-client==0.19.0
-
-# 分布式锁
-py-zookeeper==0.4.2
-
-# 缓存
-python-memcached==1.62
-
-# 序列化
-pickle-mixin==1.0.2
-
-# 多进程
-multiprocessing-logging==0.3.4
-
-# 文档生成
-Sphinx==7.2.6
-
-# 类型检查
-mypy==1.7.1
-
-# 环境变量
-python-dotenv==1.0.0
-
-# 国际化
-Babel==2.13.1
-
-# 模板引擎
-Jinja2==3.1.2
-
-# 静态文件服务
-Werkzeug==3.0.1
-
-# 数据验证
-marshmallow==3.20.1
-
-# API文档
-flask-apispec==0.11.4
-apispec==6.3.0
-
-# 分页
-Flask-SQLAlchemy-Paginate==1.0.2
-
-# 限流
-Flask-Limiter==3.5.0
-
-# 健康检查
-Flask-HealthCheck==1.0.2
+# 开发和测试依赖（可选）
+# pytest>=6.2.0,<8.0
+# pytest-cov>=2.12.0,<5.0
+# flake8>=3.9.0,<7.0
+# black>=21.5.0,<24.0

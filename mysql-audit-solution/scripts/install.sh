@@ -52,11 +52,31 @@ detect_os() {
 }
 
 # 检测MySQL版本
-detect_mysql() {
+detect_mysql_version() {
     if command -v mysql >/dev/null 2>&1; then
-        MYSQL_VERSION=$(mysql --version | awk '{print $5}' | awk -F, '{print $1}')
-        print_info "检测到MySQL版本: $MYSQL_VERSION"
-        return 0
+        MYSQL_VERSION_FULL=$(mysql --version | awk '{print $5}' | awk -F, '{print $1}')
+        MYSQL_MAJOR_VERSION=$(echo $MYSQL_VERSION_FULL | cut -d. -f1)
+        MYSQL_MINOR_VERSION=$(echo $MYSQL_VERSION_FULL | cut -d. -f2)
+        MYSQL_VERSION="${MYSQL_MAJOR_VERSION}.${MYSQL_MINOR_VERSION}"
+        
+        print_info "检测到MySQL版本: $MYSQL_VERSION_FULL"
+        
+        # 检查版本兼容性
+        case $MYSQL_VERSION in
+            "5.6"|"5.7"|"8.0")
+                print_success "MySQL版本 $MYSQL_VERSION 受支持"
+                return 0
+                ;;
+            "5.5")
+                print_warning "MySQL 5.5版本功能有限，建议升级到5.6+"
+                return 0
+                ;;
+            *)
+                print_error "不支持的MySQL版本: $MYSQL_VERSION"
+                print_info "支持的版本: 5.6, 5.7, 8.0"
+                return 1
+                ;;
+        esac
     else
         print_error "未检测到MySQL，请先安装MySQL"
         return 1
@@ -129,22 +149,78 @@ download_audit_plugin() {
             ;;
     esac
     
-    # 下载插件文件
-    PLUGIN_URL="https://downloads.mariadb.org/f/audit-plugin-mysql-5.7/server_audit-1.4.7-${PLUGIN_ARCH}.so"
+    # 根据MySQL版本选择合适的插件
     PLUGIN_FILE="server_audit.so"
+    case $MYSQL_VERSION in
+        "5.6")
+            PLUGIN_URL="https://downloads.mariadb.org/f/audit-plugin-mysql-5.6/server_audit-1.4.7-${PLUGIN_ARCH}.so"
+            print_info "使用MySQL 5.6兼容的审计插件"
+            ;;
+        "5.7")
+            PLUGIN_URL="https://downloads.mariadb.org/f/audit-plugin-mysql-5.7/server_audit-1.4.7-${PLUGIN_ARCH}.so"
+            print_info "使用MySQL 5.7兼容的审计插件"
+            ;;
+        "8.0")
+            # 对于MySQL 8.0，可能需要使用AWS的audit plugin
+            PLUGIN_URL="https://github.com/aws/audit-plugin-for-mysql/releases/download/v1.0.0/server_audit-${PLUGIN_ARCH}.so"
+            print_info "使用MySQL 8.0兼容的审计插件"
+            ;;
+        *)
+            PLUGIN_URL="https://downloads.mariadb.org/f/audit-plugin-mysql-5.7/server_audit-1.4.7-${PLUGIN_ARCH}.so"
+            print_warning "使用通用审计插件版本"
+            ;;
+    esac
+    
+    mkdir -p plugins
     
     if [[ ! -f "plugins/${PLUGIN_FILE}" ]]; then
         print_info "从远程下载审计插件..."
-        wget -O "plugins/${PLUGIN_FILE}" "$PLUGIN_URL" || {
-            print_error "下载插件失败，请检查网络连接"
-            exit 1
-        }
+        print_info "下载地址: $PLUGIN_URL"
+        
+        # 尝试下载插件
+        if ! wget -O "plugins/${PLUGIN_FILE}" "$PLUGIN_URL" 2>/dev/null; then
+            print_warning "自动下载失败，尝试本地预置插件..."
+            
+            # 如果下载失败，创建一个占位文件提示用户手动下载
+            cat > "plugins/DOWNLOAD_INSTRUCTIONS.txt" << EOF
+审计插件下载说明：
+
+请手动下载适用于MySQL ${MYSQL_VERSION}的server_audit.so插件：
+
+1. 访问 MariaDB 官方下载页面：
+   https://downloads.mariadb.org/
+
+2. 选择对应版本的插件：
+   - MySQL 5.6: https://downloads.mariadb.org/f/audit-plugin-mysql-5.6/
+   - MySQL 5.7: https://downloads.mariadb.org/f/audit-plugin-mysql-5.7/
+   
+3. 下载适用于 ${PLUGIN_ARCH} 架构的插件
+
+4. 将插件文件重命名为 server_audit.so 并放置到：
+   ${PLUGIN_DIR}/
+
+5. 设置正确的权限：
+   chmod 755 ${PLUGIN_DIR}/server_audit.so
+   chown mysql:mysql ${PLUGIN_DIR}/server_audit.so
+
+6. 重新运行安装脚本
+EOF
+            print_error "无法自动下载插件，请查看 plugins/DOWNLOAD_INSTRUCTIONS.txt"
+            print_info "或者手动将 server_audit.so 放置到 plugins/ 目录"
+            return 1
+        fi
+    fi
+    
+    # 验证插件文件
+    if [[ ! -f "plugins/${PLUGIN_FILE}" ]] || [[ ! -s "plugins/${PLUGIN_FILE}" ]]; then
+        print_error "插件文件无效或不存在"
+        return 1
     fi
     
     # 复制插件到MySQL插件目录
     cp "plugins/${PLUGIN_FILE}" "$PLUGIN_DIR/"
     chmod 755 "$PLUGIN_DIR/${PLUGIN_FILE}"
-    chown mysql:mysql "$PLUGIN_DIR/${PLUGIN_FILE}"
+    chown mysql:mysql "$PLUGIN_DIR/${PLUGIN_FILE}" 2>/dev/null || true
     
     print_success "审计插件安装完成"
 }
@@ -174,12 +250,44 @@ configure_mysql() {
     
     # 检查是否已配置审计
     if ! grep -q "server_audit" "$MYSQL_CNF"; then
-        print_info "添加审计配置到MySQL..."
+        print_info "添加审计配置到MySQL ${MYSQL_VERSION}..."
         
-        cat >> "$MYSQL_CNF" << 'EOF'
+        # 根据MySQL版本使用不同的配置
+        case $MYSQL_VERSION in
+            "5.6")
+                cat >> "$MYSQL_CNF" << 'EOF'
 
 # ================================
-# MySQL 审计配置 - MariaDB Plugin
+# MySQL 5.6 审计配置 - MariaDB Plugin
+# ================================
+# 加载审计插件
+plugin-load-add=server_audit.so
+
+# 基础配置
+server_audit_logging=ON
+server_audit_output_type=file
+server_audit_file_path=/var/log/mysql/audit.log
+server_audit_file_rotate_size=100000000
+server_audit_file_rotations=10
+
+# 审计事件类型（5.6版本支持的事件类型）
+server_audit_events=CONNECT,QUERY
+
+# 用户过滤（排除系统用户）
+server_audit_excl_users=
+
+# 性能优化
+server_audit_syslog_priority=LOG_INFO
+
+# MySQL 5.6 特定配置
+server_audit_incl_users=
+EOF
+                ;;
+            "5.7")
+                cat >> "$MYSQL_CNF" << 'EOF'
+
+# ================================
+# MySQL 5.7 审计配置 - MariaDB Plugin
 # ================================
 # 加载审计插件
 plugin-load-add=server_audit.so
@@ -200,8 +308,66 @@ server_audit_excl_users=mysql.session,mysql.sys,debian-sys-maint
 # 性能优化
 server_audit_syslog_priority=LOG_INFO
 EOF
+                ;;
+            "8.0")
+                cat >> "$MYSQL_CNF" << 'EOF'
+
+# ================================
+# MySQL 8.0 审计配置 - MariaDB Plugin
+# ================================
+# 加载审计插件
+plugin-load-add=server_audit.so
+
+# 基础配置
+server_audit_logging=ON
+server_audit_output_type=file
+server_audit_file_path=/var/log/mysql/audit.log
+server_audit_file_rotate_size=100000000
+server_audit_file_rotations=10
+
+# 审计事件类型
+server_audit_events=CONNECT,QUERY,TABLE
+
+# 用户过滤（排除系统用户）
+server_audit_excl_users=mysql.session,mysql.sys,mysql.infoschema
+
+# 性能优化
+server_audit_syslog_priority=LOG_INFO
+
+# MySQL 8.0 特定配置
+server_audit_query_log_limit=1024
+EOF
+                ;;
+            *)
+                # 默认配置
+                cat >> "$MYSQL_CNF" << 'EOF'
+
+# ================================
+# MySQL 审计配置 - MariaDB Plugin
+# ================================
+# 加载审计插件
+plugin-load-add=server_audit.so
+
+# 基础配置
+server_audit_logging=ON
+server_audit_output_type=file
+server_audit_file_path=/var/log/mysql/audit.log
+server_audit_file_rotate_size=100000000
+server_audit_file_rotations=10
+
+# 审计事件类型
+server_audit_events=CONNECT,QUERY
+
+# 用户过滤
+server_audit_excl_users=
+
+# 性能优化
+server_audit_syslog_priority=LOG_INFO
+EOF
+                ;;
+        esac
         
-        print_success "MySQL审计配置已添加"
+        print_success "MySQL ${MYSQL_VERSION} 审计配置已添加"
     else
         print_warning "MySQL审计配置已存在，跳过"
     fi
@@ -482,7 +648,7 @@ main() {
     # 检测系统环境
     detect_os
     
-    if ! detect_mysql; then
+    if ! detect_mysql_version; then
         print_error "请先安装MySQL后再运行此脚本"
         exit 1
     fi
