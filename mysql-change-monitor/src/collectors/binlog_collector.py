@@ -30,9 +30,10 @@ class BinlogCollector:
         }
         
         # 监控配置
-        self.monitored_databases = config.get('monitoring.databases', [])
-        self.monitored_tables = config.get('monitoring.tables', [])
-        self.exclude_tables = config.get('monitoring.exclude_tables', [])
+        self.monitoring_mode = config.get('monitoring', {}).get('mode', 'whitelist')
+        self.monitored_databases = config.get('monitoring', {}).get('databases', [])
+        self.target_tables = config.get('monitoring', {}).get('target_tables', [])
+        self.exclude_tables = config.get('monitoring', {}).get('exclude_tables', [])
         
         # 状态管理
         self.running = False
@@ -256,20 +257,44 @@ class BinlogCollector:
         if self.monitored_databases and schema not in self.monitored_databases:
             return False
         
-        # 检查表黑名单
         full_table_name = f"{schema}.{table}"
-        for exclude_pattern in self.exclude_tables:
-            if self._match_pattern(full_table_name, exclude_pattern):
-                return False
+        table_only = table
         
-        # 检查表白名单
-        if self.monitored_tables:
-            for monitor_pattern in self.monitored_tables:
-                if self._match_pattern(full_table_name, monitor_pattern):
+        # 白名单模式：只监控指定的表
+        if self.monitoring_mode == 'whitelist':
+            if not self.target_tables:
+                return False  # 没有指定表则不监控任何表
+            
+            # 检查是否在目标表列表中
+            for target_table in self.target_tables:
+                if self._match_table_pattern(full_table_name, table_only, target_table):
+                    # 即使在白名单中，也要检查是否在排除列表中
+                    for exclude_pattern in self.exclude_tables:
+                        if self._match_pattern(full_table_name, exclude_pattern):
+                            return False
                     return True
             return False
         
-        return True
+        # 黑名单模式：监控所有表除了排除的
+        elif self.monitoring_mode == 'blacklist':
+            # 检查表黑名单
+            for exclude_pattern in self.exclude_tables:
+                if self._match_pattern(full_table_name, exclude_pattern):
+                    return False
+            return True
+        
+        return False
+    
+    def _match_table_pattern(self, full_table_name: str, table_only: str, pattern: str) -> bool:
+        """匹配表模式，支持 database.table 或 table 格式"""
+        pattern = pattern.strip('"\'')  # 移除引号
+        
+        # 如果模式包含点，说明是 database.table 格式
+        if '.' in pattern:
+            return self._match_pattern(full_table_name.lower(), pattern.lower())
+        else:
+            # 只有表名，匹配表名部分
+            return self._match_pattern(table_only.lower(), pattern.lower())
     
     def _match_pattern(self, name: str, pattern: str) -> bool:
         """匹配模式（支持通配符）"""
