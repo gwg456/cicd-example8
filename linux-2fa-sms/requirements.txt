@@ -1,0 +1,48 @@
+# 阿里云短信服务SDK
+alibabacloud-dysmsapi20170525>=2.1.0
+alibabacloud-tea-openapi>=0.3.7
+
+# HTTP请求库
+requests>=2.28.0
+
+# 加密库
+cryptography>=39.0.0
+
+# 配置文件处理
+configparser>=5.3.0
+
+# 日志库
+loguru>=0.6.0
+
+# 缓存库 (可选)
+redis>=4.5.0
+
+# 时间处理
+python-dateutil>=2.8.2
+
+# JSON 处理
+ujson>=5.7.0
+
+# 正则表达式
+regex>=2022.10.31
+
+# 随机数生成
+secrets
+
+# 系统交互
+psutil>=5.9.0
+
+# PAM 模块支持
+python-pam>=2.0.2
+
+# 数据验证
+pydantic>=1.10.0
+
+# 命令行工具
+click>=8.1.0
+
+# 颜色输出
+colorama>=0.4.6
+
+# 进度条
+tqdm>=4.64.0
