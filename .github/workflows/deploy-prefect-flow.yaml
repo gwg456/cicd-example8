@@ -20,31 +20,61 @@ jobs:
 
       - name: Configure hosts for Docker Hub access
         run: |
-          # 配置Docker Hub域名解析，使用预设的IP地址
-          sudo cat docker-hosts.txt >> /etc/hosts
+          # 检查当前用户权限
+          echo "当前用户: $(whoami)"
+          echo "当前用户组: $(groups)"
+          
+          # 备份原始hosts文件
+          sudo cp /etc/hosts /etc/hosts.backup.$(date +%Y%m%d_%H%M%S)
+          
+          # 检查docker-hosts.txt文件是否存在
+          if [ ! -f "docker-hosts.txt" ]; then
+            echo "❌ docker-hosts.txt 文件不存在"
+            exit 1
+          fi
+          
+          echo "📋 添加Docker Hub域名解析..."
+          # 使用sudo和tee命令安全地添加内容
+          sudo tee -a /etc/hosts < docker-hosts.txt
+          
           echo "✅ Docker Hub域名配置完成"
-          echo "📋 当前配置:"
-          tail -10 /etc/hosts
+          echo "📋 当前hosts文件末尾10行:"
+          sudo tail -10 /etc/hosts
 
       - name: Extract Docker Hub hosts for container build
         run: |
-          # 提取Docker Hub相关的hosts条目，传递给容器构建
+          # 给脚本添加执行权限
           chmod +x scripts/extract-docker-hosts.sh
+          
+          # 提取Docker Hub相关的hosts条目
+          echo "🔍 提取Docker Hub hosts配置..."
           ./scripts/extract-docker-hosts.sh
           
-          # 创建用于构建的add-hosts参数
-          echo "DOCKER_ADD_HOSTS<<EOF" >> $GITHUB_ENV
-          cat docker-add-hosts.txt >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+          # 检查是否成功生成了add-hosts文件
+          if [ -f "docker-add-hosts.txt" ]; then
+            echo "✅ 成功提取Docker Hub hosts配置"
+            echo "📋 提取的配置:"
+            cat docker-add-hosts.txt
+          else
+            echo "❌ 未能生成docker-add-hosts.txt文件"
+          fi
 
       - name: Test Docker Hub connectivity
         run: |
           # 测试Docker Hub连接性
-          echo "Testing Docker Hub connectivity..."
-          curl -I https://registry-1.docker.io/v2/ || echo "Direct connection failed"
+          echo "🧪 Testing Docker Hub connectivity..."
+          
           # 测试域名解析
-          nslookup registry-1.docker.io
+          echo "📡 测试域名解析:"
+          nslookup registry-1.docker.io || echo "nslookup failed"
+          
+          # 测试ping连接
+          echo "🏓 测试ping连接:"
           ping -c 3 registry-1.docker.io || echo "Ping failed but continuing..."
+          
+          # 测试HTTP连接
+          echo "🌐 测试HTTP连接:"
+          curl -I --connect-timeout 10 https://registry-1.docker.io/v2/ || echo "HTTP connection failed"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
