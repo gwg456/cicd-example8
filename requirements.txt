@@ -14,3 +14,7 @@ mypy==1.7.1
 # 类型提示
 typing-extensions==4.8.0
 
+# 监控和健康检查
+requests==2.31.0
+bandit==1.7.5
+
