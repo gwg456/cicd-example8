@@ -1,0 +1,20 @@
+# PDF 生成所需依赖
+
+# Markdown 处理
+markdown>=3.4.0
+Pygments>=2.14.0
+
+# PDF 生成
+weasyprint>=59.0
+reportlab>=4.0.0
+
+# 字体支持
+fonttools>=4.38.0
+
+# HTML 处理
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+
+# 可选依赖 - 增强功能
+Pillow>=9.0.0  # 图片处理
+requests>=2.28.0  # 网络字体下载
