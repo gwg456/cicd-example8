@@ -1,0 +1,239 @@
+name: 基础 SSH 连接示例
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  basic-ssh-connection:
+    runs-on: ubuntu-latest
+    name: 基础 SSH 连接测试
+    
+    steps:
+    - name: Checkout 代码
+      uses: actions/checkout@v4
+      
+    - name: 设置 SSH 密钥
+      uses: shimataro/ssh-key-action@v2
+      with:
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        name: id_rsa
+        known_hosts: ${{ secrets.KNOWN_HOSTS }}
+        if_key_exists: replace
+        
+    - name: 测试 SSH 连接
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          echo "🎉 SSH 连接成功!"
+          echo "当前时间: $(date)"
+          echo "服务器信息: $(uname -a)"
+          echo "当前用户: $(whoami)"
+          echo "当前目录: $(pwd)"
+          echo "磁盘空间:"
+          df -h
+          echo "内存使用:"
+          free -h
+          
+  ssh-with-commands:
+    runs-on: ubuntu-latest
+    name: 执行多个 SSH 命令
+    needs: basic-ssh-connection
+    
+    steps:
+    - name: 执行系统检查命令
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          # 系统信息检查
+          echo "=== 系统信息 ==="
+          hostnamectl
+          
+          echo -e "\n=== CPU 信息 ==="
+          lscpu | head -20
+          
+          echo -e "\n=== 网络连接 ==="
+          ss -tuln
+          
+          echo -e "\n=== 运行的服务 ==="
+          systemctl list-units --type=service --state=running | head -10
+          
+          echo -e "\n=== 环境变量 ==="
+          env | grep -E '^(PATH|HOME|USER)='
+          
+    - name: 检查特定服务状态
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          # 检查常见服务状态
+          services=("nginx" "apache2" "mysql" "postgresql" "redis" "docker")
+          
+          for service in "${services[@]}"; do
+            if systemctl list-unit-files | grep -q "^$service.service"; then
+              status=$(systemctl is-active $service 2>/dev/null || echo "not-found")
+              echo "📋 $service: $status"
+            fi
+          done
+          
+          # 检查端口占用
+          echo -e "\n🔌 端口占用情况:"
+          netstat -tlnp | grep -E ':(80|443|22|3306|5432|6379) '
+          
+  ssh-file-operations:
+    runs-on: ubuntu-latest
+    name: SSH 文件操作示例
+    
+    steps:
+    - name: Checkout 代码
+      uses: actions/checkout@v4
+      
+    - name: 创建测试文件
+      run: |
+        echo "GitHub Actions 部署测试" > test-file.txt
+        echo "构建时间: $(date)" >> test-file.txt
+        echo "提交 SHA: ${{ github.sha }}" >> test-file.txt
+        echo "分支: ${{ github.ref_name }}" >> test-file.txt
+        
+    - name: 上传文件到服务器
+      uses: appleboy/scp-action@v0.1.4
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        source: "test-file.txt"
+        target: "/tmp/"
+        
+    - name: 在服务器上处理文件
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          echo "📁 检查上传的文件:"
+          ls -la /tmp/test-file.txt
+          
+          echo -e "\n📖 文件内容:"
+          cat /tmp/test-file.txt
+          
+          echo -e "\n✅ 文件处理完成"
+          
+          # 创建备份
+          cp /tmp/test-file.txt /tmp/test-file-backup-$(date +%Y%m%d_%H%M%S).txt
+          
+          echo -e "\n💾 备份文件列表:"
+          ls -la /tmp/test-file-backup-*.txt
+          
+          # 清理旧备份 (保留最新3个)
+          ls -t /tmp/test-file-backup-*.txt | tail -n +4 | xargs -r rm -f
+          
+  ssh-with-environment:
+    runs-on: ubuntu-latest
+    name: SSH 环境变量示例
+    
+    steps:
+    - name: 使用环境变量执行命令
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        envs: GITHUB_SHA,GITHUB_REF_NAME,DEPLOY_ENV
+        script: |
+          echo "🔧 GitHub Actions 环境变量:"
+          echo "SHA: $GITHUB_SHA"
+          echo "分支: $GITHUB_REF_NAME"
+          echo "部署环境: $DEPLOY_ENV"
+          
+          # 设置部署环境
+          export DEPLOY_TIME=$(date)
+          export APP_VERSION=$GITHUB_SHA
+          
+          echo -e "\n📝 部署信息:"
+          echo "部署时间: $DEPLOY_TIME"
+          echo "应用版本: $APP_VERSION"
+          
+          # 保存部署信息
+          cat > /tmp/deploy-info.json << EOF
+          {
+            "deploy_time": "$DEPLOY_TIME",
+            "app_version": "$APP_VERSION",
+            "branch": "$GITHUB_REF_NAME",
+            "commit_sha": "$GITHUB_SHA"
+          }
+          EOF
+          
+          echo -e "\n💾 部署信息已保存:"
+          cat /tmp/deploy-info.json
+      env:
+        DEPLOY_ENV: production
+        
+  ssh-error-handling:
+    runs-on: ubuntu-latest
+    name: SSH 错误处理示例
+    
+    steps:
+    - name: 命令执行与错误处理
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          set -e  # 遇到错误立即退出
+          
+          echo "🧪 测试错误处理..."
+          
+          # 测试成功的命令
+          echo "✅ 成功命令: $(date)"
+          
+          # 测试可能失败的命令
+          if command -v docker >/dev/null 2>&1; then
+            echo "✅ Docker 已安装: $(docker --version)"
+          else
+            echo "⚠️ Docker 未安装"
+          fi
+          
+          # 检查服务状态 (允许失败)
+          if systemctl is-active nginx >/dev/null 2>&1; then
+            echo "✅ Nginx 服务运行中"
+          else
+            echo "⚠️ Nginx 服务未运行或未安装"
+          fi
+          
+          echo "🎯 错误处理测试完成"
+          
+    - name: 条件执行示例
+      if: success()
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.SSH_HOST }}
+        username: ${{ secrets.SSH_USERNAME }}
+        key: ${{ secrets.SSH_PRIVATE_KEY }}
+        port: ${{ secrets.SSH_PORT || 22 }}
+        script: |
+          echo "✨ 前面的步骤都成功了，执行清理任务..."
+          
+          # 清理临时文件
+          find /tmp -name "test-file*" -mtime +1 -delete 2>/dev/null || true
+          
+          echo "🧹 清理完成"

@@ -1,0 +1,582 @@
+name: 数据库备份与管理
+
+on:
+  schedule:
+    # 每天凌晨 2 点自动备份
+    - cron: '0 2 * * *'
+    # 每周日凌晨 1 点进行完整备份
+    - cron: '0 1 * * 0'
+  workflow_dispatch:
+    inputs:
+      backup_type:
+        description: '备份类型'
+        required: true
+        default: 'incremental'
+        type: choice
+        options:
+        - incremental
+        - full
+        - schema_only
+      databases:
+        description: '数据库名称 (逗号分隔，空为全部)'
+        required: false
+        default: ''
+      retention_days:
+        description: '保留天数'
+        required: false
+        default: '7'
+
+env:
+  BACKUP_DIR: '/backup/database'
+  S3_BUCKET: 'my-app-backups'
+
+jobs:
+  prepare-backup:
+    runs-on: ubuntu-latest
+    name: 准备备份
+    outputs:
+      backup-type: ${{ steps.setup.outputs.backup-type }}
+      databases: ${{ steps.setup.outputs.databases }}
+      timestamp: ${{ steps.setup.outputs.timestamp }}
+      retention-days: ${{ steps.setup.outputs.retention-days }}
+      
+    steps:
+    - name: 设置备份参数
+      id: setup
+      run: |
+        # 设置时间戳
+        timestamp=$(date +%Y%m%d_%H%M%S)
+        echo "timestamp=$timestamp" >> $GITHUB_OUTPUT
+        
+        # 确定备份类型
+        if [ "${{ github.event_name }}" == "schedule" ]; then
+          if [ "${{ github.event.schedule }}" == "0 1 * * 0" ]; then
+            backup_type="full"
+            retention_days="30"
+          else
+            backup_type="incremental"
+            retention_days="7"
+          fi
+        else
+          backup_type="${{ github.event.inputs.backup_type || 'incremental' }}"
+          retention_days="${{ github.event.inputs.retention_days || '7' }}"
+        fi
+        
+        echo "backup-type=$backup_type" >> $GITHUB_OUTPUT
+        echo "retention-days=$retention_days" >> $GITHUB_OUTPUT
+        
+        # 设置数据库列表
+        if [ -n "${{ github.event.inputs.databases }}" ]; then
+          databases="${{ github.event.inputs.databases }}"
+        else
+          databases="myapp_prod,myapp_analytics,myapp_logs"
+        fi
+        echo "databases=$databases" >> $GITHUB_OUTPUT
+        
+        echo "📋 备份配置:"
+        echo "- 类型: $backup_type"
+        echo "- 数据库: $databases"
+        echo "- 时间戳: $timestamp"
+        echo "- 保留天数: $retention_days"
+
+  mysql-backup:
+    runs-on: ubuntu-latest
+    needs: prepare-backup
+    name: MySQL 数据库备份
+    
+    steps:
+    - name: Checkout 代码
+      uses: actions/checkout@v4
+      
+    - name: 执行 MySQL 备份
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.MYSQL_SSH_HOST }}
+        username: ${{ secrets.MYSQL_SSH_USERNAME }}
+        key: ${{ secrets.MYSQL_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.MYSQL_SSH_PORT || 22 }}
+        envs: BACKUP_TYPE,DATABASES,TIMESTAMP,RETENTION_DAYS
+        script: |
+          set -e
+          
+          echo "🗄️ 开始 MySQL 数据库备份..."
+          echo "备份类型: $BACKUP_TYPE"
+          echo "数据库: $DATABASES"
+          echo "时间戳: $TIMESTAMP"
+          
+          # 创建备份目录
+          sudo mkdir -p ${{ env.BACKUP_DIR }}/mysql/$TIMESTAMP
+          cd ${{ env.BACKUP_DIR }}/mysql/$TIMESTAMP
+          
+          # 数据库连接参数
+          MYSQL_HOST="${{ secrets.MYSQL_HOST }}"
+          MYSQL_PORT="${{ secrets.MYSQL_PORT || 3306 }}"
+          MYSQL_USER="${{ secrets.MYSQL_USER }}"
+          MYSQL_PASSWORD="${{ secrets.MYSQL_PASSWORD }}"
+          
+          # 分割数据库列表
+          IFS=',' read -ra DB_ARRAY <<< "$DATABASES"
+          
+          for db in "${DB_ARRAY[@]}"; do
+            db=$(echo "$db" | xargs)  # 去除空格
+            echo "📦 备份数据库: $db"
+            
+            case "$BACKUP_TYPE" in
+              "full")
+                # 完整备份
+                mysqldump \
+                  --host="$MYSQL_HOST" \
+                  --port="$MYSQL_PORT" \
+                  --user="$MYSQL_USER" \
+                  --password="$MYSQL_PASSWORD" \
+                  --single-transaction \
+                  --routines \
+                  --triggers \
+                  --events \
+                  --hex-blob \
+                  --master-data=2 \
+                  --flush-logs \
+                  "$db" | gzip > "${db}_full_${TIMESTAMP}.sql.gz"
+                ;;
+                
+              "incremental")
+                # 增量备份 (基于 binlog)
+                mysqldump \
+                  --host="$MYSQL_HOST" \
+                  --port="$MYSQL_PORT" \
+                  --user="$MYSQL_USER" \
+                  --password="$MYSQL_PASSWORD" \
+                  --single-transaction \
+                  --master-data=2 \
+                  --flush-logs \
+                  "$db" | gzip > "${db}_incremental_${TIMESTAMP}.sql.gz"
+                  
+                # 复制 binlog 文件
+                sudo cp /var/log/mysql/mysql-bin.* . 2>/dev/null || echo "⚠️ 无法复制 binlog 文件"
+                ;;
+                
+              "schema_only")
+                # 仅结构备份
+                mysqldump \
+                  --host="$MYSQL_HOST" \
+                  --port="$MYSQL_PORT" \
+                  --user="$MYSQL_USER" \
+                  --password="$MYSQL_PASSWORD" \
+                  --no-data \
+                  --routines \
+                  --triggers \
+                  --events \
+                  "$db" | gzip > "${db}_schema_${TIMESTAMP}.sql.gz"
+                ;;
+            esac
+            
+            # 验证备份文件
+            if [ -f "${db}_${BACKUP_TYPE}_${TIMESTAMP}.sql.gz" ]; then
+              file_size=$(stat -c%s "${db}_${BACKUP_TYPE}_${TIMESTAMP}.sql.gz")
+              if [ $file_size -gt 0 ]; then
+                echo "✅ $db 备份成功 (${file_size} bytes)"
+              else
+                echo "❌ $db 备份文件为空"
+                exit 1
+              fi
+            else
+              echo "❌ $db 备份文件不存在"
+              exit 1
+            fi
+          done
+          
+          # 创建备份元数据
+          cat > backup_metadata.json << EOF
+          {
+            "backup_time": "$(date -Iseconds)",
+            "backup_type": "$BACKUP_TYPE",
+            "databases": "$DATABASES",
+            "mysql_version": "$(mysql --version)",
+            "server_info": "$(uname -a)",
+            "backup_size": "$(du -sh . | cut -f1)"
+          }
+          EOF
+          
+          echo "📊 备份元数据:"
+          cat backup_metadata.json
+          
+          # 计算校验和
+          echo "🔐 计算文件校验和..."
+          sha256sum *.gz > checksums.sha256
+          
+          echo "✅ MySQL 备份完成"
+      env:
+        BACKUP_TYPE: ${{ needs.prepare-backup.outputs.backup-type }}
+        DATABASES: ${{ needs.prepare-backup.outputs.databases }}
+        TIMESTAMP: ${{ needs.prepare-backup.outputs.timestamp }}
+        RETENTION_DAYS: ${{ needs.prepare-backup.outputs.retention-days }}
+
+  postgresql-backup:
+    runs-on: ubuntu-latest
+    needs: prepare-backup
+    name: PostgreSQL 数据库备份
+    
+    steps:
+    - name: 执行 PostgreSQL 备份
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.POSTGRES_SSH_HOST }}
+        username: ${{ secrets.POSTGRES_SSH_USERNAME }}
+        key: ${{ secrets.POSTGRES_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.POSTGRES_SSH_PORT || 22 }}
+        envs: BACKUP_TYPE,DATABASES,TIMESTAMP,RETENTION_DAYS
+        script: |
+          set -e
+          
+          echo "🐘 开始 PostgreSQL 数据库备份..."
+          echo "备份类型: $BACKUP_TYPE"
+          echo "数据库: $DATABASES"
+          echo "时间戳: $TIMESTAMP"
+          
+          # 设置 PostgreSQL 环境变量
+          export PGHOST="${{ secrets.POSTGRES_HOST }}"
+          export PGPORT="${{ secrets.POSTGRES_PORT || 5432 }}"
+          export PGUSER="${{ secrets.POSTGRES_USER }}"
+          export PGPASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
+          
+          # 创建备份目录
+          sudo mkdir -p ${{ env.BACKUP_DIR }}/postgresql/$TIMESTAMP
+          cd ${{ env.BACKUP_DIR }}/postgresql/$TIMESTAMP
+          
+          # 分割数据库列表
+          IFS=',' read -ra DB_ARRAY <<< "$DATABASES"
+          
+          for db in "${DB_ARRAY[@]}"; do
+            db=$(echo "$db" | xargs)  # 去除空格
+            echo "📦 备份数据库: $db"
+            
+            case "$BACKUP_TYPE" in
+              "full")
+                # 完整备份 (自定义格式，支持并行恢复)
+                pg_dump \
+                  --format=custom \
+                  --compress=9 \
+                  --verbose \
+                  --file="${db}_full_${TIMESTAMP}.dump" \
+                  "$db"
+                  
+                # 同时创建 SQL 格式备份
+                pg_dump \
+                  --format=plain \
+                  --verbose \
+                  "$db" | gzip > "${db}_full_${TIMESTAMP}.sql.gz"
+                ;;
+                
+              "incremental")
+                # PostgreSQL 增量备份 (使用 WAL)
+                pg_dump \
+                  --format=custom \
+                  --compress=9 \
+                  --verbose \
+                  --file="${db}_incremental_${TIMESTAMP}.dump" \
+                  "$db"
+                  
+                # 归档 WAL 文件
+                echo "📂 归档 WAL 文件..."
+                sudo find /var/lib/postgresql/*/main/pg_wal -name "*.ready" -type f | \
+                  sudo xargs -I {} cp {} ./ 2>/dev/null || echo "⚠️ 无法复制 WAL 文件"
+                ;;
+                
+              "schema_only")
+                # 仅结构备份
+                pg_dump \
+                  --schema-only \
+                  --format=plain \
+                  --verbose \
+                  "$db" | gzip > "${db}_schema_${TIMESTAMP}.sql.gz"
+                ;;
+            esac
+            
+            # 验证备份文件
+            backup_file="${db}_${BACKUP_TYPE}_${TIMESTAMP}.dump"
+            sql_file="${db}_${BACKUP_TYPE}_${TIMESTAMP}.sql.gz"
+            
+            if [ -f "$backup_file" ] || [ -f "$sql_file" ]; then
+              if [ -f "$backup_file" ]; then
+                file_size=$(stat -c%s "$backup_file")
+                echo "✅ $db 备份成功 (dump: ${file_size} bytes)"
+              fi
+              if [ -f "$sql_file" ]; then
+                file_size=$(stat -c%s "$sql_file")
+                echo "✅ $db 备份成功 (sql: ${file_size} bytes)"
+              fi
+            else
+              echo "❌ $db 备份失败"
+              exit 1
+            fi
+          done
+          
+          # 备份全局对象 (用户、角色等)
+          echo "👥 备份全局对象..."
+          pg_dumpall --globals-only | gzip > "globals_${TIMESTAMP}.sql.gz"
+          
+          # 创建备份元数据
+          cat > backup_metadata.json << EOF
+          {
+            "backup_time": "$(date -Iseconds)",
+            "backup_type": "$BACKUP_TYPE",
+            "databases": "$DATABASES",
+            "postgresql_version": "$(psql --version)",
+            "server_info": "$(uname -a)",
+            "backup_size": "$(du -sh . | cut -f1)"
+          }
+          EOF
+          
+          echo "📊 备份元数据:"
+          cat backup_metadata.json
+          
+          # 计算校验和
+          echo "🔐 计算文件校验和..."
+          sha256sum * > checksums.sha256
+          
+          echo "✅ PostgreSQL 备份完成"
+      env:
+        BACKUP_TYPE: ${{ needs.prepare-backup.outputs.backup-type }}
+        DATABASES: ${{ needs.prepare-backup.outputs.databases }}
+        TIMESTAMP: ${{ needs.prepare-backup.outputs.timestamp }}
+        RETENTION_DAYS: ${{ needs.prepare-backup.outputs.retention-days }}
+
+  upload-to-cloud:
+    runs-on: ubuntu-latest
+    needs: [prepare-backup, mysql-backup, postgresql-backup]
+    name: 上传备份到云存储
+    
+    steps:
+    - name: 上传 MySQL 备份到 S3
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.MYSQL_SSH_HOST }}
+        username: ${{ secrets.MYSQL_SSH_USERNAME }}
+        key: ${{ secrets.MYSQL_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.MYSQL_SSH_PORT || 22 }}
+        envs: TIMESTAMP,S3_BUCKET
+        script: |
+          echo "☁️ 上传 MySQL 备份到 S3..."
+          
+          # 配置 AWS CLI
+          export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+          export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
+          
+          backup_dir="${{ env.BACKUP_DIR }}/mysql/$TIMESTAMP"
+          
+          if [ -d "$backup_dir" ]; then
+            cd "$backup_dir"
+            
+            # 上传所有备份文件
+            aws s3 sync . "s3://$S3_BUCKET/mysql/$TIMESTAMP/" \
+              --storage-class STANDARD_IA \
+              --metadata "backup-type=${{ needs.prepare-backup.outputs.backup-type }},created-by=github-actions"
+              
+            echo "✅ MySQL 备份已上传到 S3"
+          else
+            echo "⚠️ MySQL 备份目录不存在"
+          fi
+      env:
+        TIMESTAMP: ${{ needs.prepare-backup.outputs.timestamp }}
+        S3_BUCKET: ${{ env.S3_BUCKET }}
+        
+    - name: 上传 PostgreSQL 备份到 S3
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.POSTGRES_SSH_HOST }}
+        username: ${{ secrets.POSTGRES_SSH_USERNAME }}
+        key: ${{ secrets.POSTGRES_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.POSTGRES_SSH_PORT || 22 }}
+        envs: TIMESTAMP,S3_BUCKET
+        script: |
+          echo "☁️ 上传 PostgreSQL 备份到 S3..."
+          
+          # 配置 AWS CLI
+          export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+          export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
+          
+          backup_dir="${{ env.BACKUP_DIR }}/postgresql/$TIMESTAMP"
+          
+          if [ -d "$backup_dir" ]; then
+            cd "$backup_dir"
+            
+            # 上传所有备份文件
+            aws s3 sync . "s3://$S3_BUCKET/postgresql/$TIMESTAMP/" \
+              --storage-class STANDARD_IA \
+              --metadata "backup-type=${{ needs.prepare-backup.outputs.backup-type }},created-by=github-actions"
+              
+            echo "✅ PostgreSQL 备份已上传到 S3"
+          else
+            echo "⚠️ PostgreSQL 备份目录不存在"
+          fi
+      env:
+        TIMESTAMP: ${{ needs.prepare-backup.outputs.timestamp }}
+        S3_BUCKET: ${{ env.S3_BUCKET }}
+
+  cleanup-old-backups:
+    runs-on: ubuntu-latest
+    needs: [prepare-backup, upload-to-cloud]
+    name: 清理旧备份
+    
+    steps:
+    - name: 清理本地旧备份
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.MYSQL_SSH_HOST }}
+        username: ${{ secrets.MYSQL_SSH_USERNAME }}
+        key: ${{ secrets.MYSQL_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.MYSQL_SSH_PORT || 22 }}
+        envs: RETENTION_DAYS
+        script: |
+          echo "🧹 清理本地旧备份..."
+          
+          # 清理 MySQL 备份
+          if [ -d "${{ env.BACKUP_DIR }}/mysql" ]; then
+            find "${{ env.BACKUP_DIR }}/mysql" -type d -mtime +$RETENTION_DAYS -exec rm -rf {} + 2>/dev/null || true
+            echo "✅ MySQL 本地旧备份已清理"
+          fi
+          
+          # 清理 PostgreSQL 备份
+          if [ -d "${{ env.BACKUP_DIR }}/postgresql" ]; then
+            find "${{ env.BACKUP_DIR }}/postgresql" -type d -mtime +$RETENTION_DAYS -exec rm -rf {} + 2>/dev/null || true
+            echo "✅ PostgreSQL 本地旧备份已清理"
+          fi
+          
+          # 显示当前备份占用空间
+          echo "📊 当前备份占用空间:"
+          du -sh "${{ env.BACKUP_DIR }}"/* 2>/dev/null || echo "无备份文件"
+      env:
+        RETENTION_DAYS: ${{ needs.prepare-backup.outputs.retention-days }}
+        
+    - name: 清理 S3 旧备份
+      run: |
+        echo "☁️ 清理 S3 旧备份..."
+        
+        # 配置 AWS CLI
+        export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+        export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+        export AWS_DEFAULT_REGION="${{ secrets.AWS_REGION }}"
+        
+        # 计算截止日期
+        cutoff_date=$(date -d "${{ needs.prepare-backup.outputs.retention-days }} days ago" +%Y%m%d)
+        
+        # 清理旧的 MySQL 备份
+        aws s3 ls "s3://${{ env.S3_BUCKET }}/mysql/" | while read -r line; do
+          folder_date=$(echo "$line" | awk '{print $2}' | sed 's/\///g' | cut -c1-8)
+          if [ "$folder_date" -lt "$cutoff_date" ]; then
+            folder_name=$(echo "$line" | awk '{print $2}')
+            echo "🗑️ 删除旧备份: mysql/$folder_name"
+            aws s3 rm "s3://${{ env.S3_BUCKET }}/mysql/$folder_name" --recursive
+          fi
+        done
+        
+        # 清理旧的 PostgreSQL 备份
+        aws s3 ls "s3://${{ env.S3_BUCKET }}/postgresql/" | while read -r line; do
+          folder_date=$(echo "$line" | awk '{print $2}' | sed 's/\///g' | cut -c1-8)
+          if [ "$folder_date" -lt "$cutoff_date" ]; then
+            folder_name=$(echo "$line" | awk '{print $2}')
+            echo "🗑️ 删除旧备份: postgresql/$folder_name"
+            aws s3 rm "s3://${{ env.S3_BUCKET }}/postgresql/$folder_name" --recursive
+          fi
+        done
+        
+        echo "✅ S3 旧备份清理完成"
+
+  backup-verification:
+    runs-on: ubuntu-latest
+    needs: [prepare-backup, mysql-backup, postgresql-backup]
+    name: 备份验证
+    
+    steps:
+    - name: 验证 MySQL 备份
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.MYSQL_SSH_HOST }}
+        username: ${{ secrets.MYSQL_SSH_USERNAME }}
+        key: ${{ secrets.MYSQL_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.MYSQL_SSH_PORT || 22 }}
+        envs: TIMESTAMP
+        script: |
+          echo "🔍 验证 MySQL 备份..."
+          
+          backup_dir="${{ env.BACKUP_DIR }}/mysql/$TIMESTAMP"
+          cd "$backup_dir"
+          
+          # 验证校验和
+          if sha256sum -c checksums.sha256; then
+            echo "✅ MySQL 备份文件校验和验证通过"
+          else
+            echo "❌ MySQL 备份文件校验和验证失败"
+            exit 1
+          fi
+          
+          # 测试备份文件完整性
+          for gz_file in *.sql.gz; do
+            if [ -f "$gz_file" ]; then
+              if gunzip -t "$gz_file"; then
+                echo "✅ $gz_file 文件完整性验证通过"
+              else
+                echo "❌ $gz_file 文件损坏"
+                exit 1
+              fi
+            fi
+          done
+      env:
+        TIMESTAMP: ${{ needs.prepare-backup.outputs.timestamp }}
+
+  notification:
+    runs-on: ubuntu-latest
+    needs: [prepare-backup, mysql-backup, postgresql-backup, upload-to-cloud, cleanup-old-backups, backup-verification]
+    if: always()
+    name: 发送通知
+    
+    steps:
+    - name: 发送备份状态通知
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "text": "🗄️ 数据库备份报告",
+            "attachments": [
+              {
+                "color": "${{ contains(needs.*.result, 'failure') && 'danger' || 'good' }}",
+                "fields": [
+                  {
+                    "title": "备份类型",
+                    "value": "${{ needs.prepare-backup.outputs.backup-type }}",
+                    "short": true
+                  },
+                  {
+                    "title": "时间戳",
+                    "value": "${{ needs.prepare-backup.outputs.timestamp }}",
+                    "short": true
+                  },
+                  {
+                    "title": "MySQL 备份",
+                    "value": "${{ needs.mysql-backup.result }}",
+                    "short": true
+                  },
+                  {
+                    "title": "PostgreSQL 备份",
+                    "value": "${{ needs.postgresql-backup.result }}",
+                    "short": true
+                  },
+                  {
+                    "title": "云存储上传",
+                    "value": "${{ needs.upload-to-cloud.result }}",
+                    "short": true
+                  },
+                  {
+                    "title": "备份验证",
+                    "value": "${{ needs.backup-verification.result }}",
+                    "short": true
+                  }
+                ]
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

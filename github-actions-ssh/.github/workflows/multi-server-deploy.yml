@@ -1,0 +1,457 @@
+name: 多服务器并行部署
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      servers:
+        description: '目标服务器 (逗号分隔)'
+        required: false
+        default: 'all'
+      skip_backup:
+        description: '跳过备份'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    name: 准备部署
+    outputs:
+      servers: ${{ steps.setup.outputs.servers }}
+      timestamp: ${{ steps.setup.outputs.timestamp }}
+      
+    steps:
+    - name: 设置部署参数
+      id: setup
+      run: |
+        # 设置时间戳
+        echo "timestamp=$(date +%Y%m%d_%H%M%S)" >> $GITHUB_OUTPUT
+        
+        # 设置服务器列表
+        if [ "${{ github.event.inputs.servers }}" == "all" ] || [ -z "${{ github.event.inputs.servers }}" ]; then
+          echo "servers=[\"web1\", \"web2\", \"web3\", \"api1\", \"api2\"]" >> $GITHUB_OUTPUT
+        else
+          # 转换逗号分隔的服务器列表为 JSON 数组
+          servers="${{ github.event.inputs.servers }}"
+          json_array=$(echo "$servers" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
+          echo "servers=$json_array" >> $GITHUB_OUTPUT
+        fi
+
+  deploy-web-servers:
+    runs-on: ubuntu-latest
+    needs: prepare
+    strategy:
+      matrix:
+        server: ${{ fromJson(needs.prepare.outputs.servers) }}
+      fail-fast: false
+      max-parallel: 3
+    name: 部署到 ${{ matrix.server }}
+    
+    steps:
+    - name: Checkout 代码
+      uses: actions/checkout@v4
+      
+    - name: 获取服务器配置
+      id: config
+      run: |
+        case "${{ matrix.server }}" in
+          "web1")
+            echo "host=${{ secrets.WEB1_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "username=${{ secrets.WEB1_SSH_USERNAME }}" >> $GITHUB_OUTPUT
+            echo "key=${{ secrets.WEB1_SSH_PRIVATE_KEY }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.WEB1_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "type=web" >> $GITHUB_OUTPUT
+            ;;
+          "web2")
+            echo "host=${{ secrets.WEB2_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "username=${{ secrets.WEB2_SSH_USERNAME }}" >> $GITHUB_OUTPUT
+            echo "key=${{ secrets.WEB2_SSH_PRIVATE_KEY }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.WEB2_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "type=web" >> $GITHUB_OUTPUT
+            ;;
+          "web3")
+            echo "host=${{ secrets.WEB3_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "username=${{ secrets.WEB3_SSH_USERNAME }}" >> $GITHUB_OUTPUT
+            echo "key=${{ secrets.WEB3_SSH_PRIVATE_KEY }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.WEB3_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "type=web" >> $GITHUB_OUTPUT
+            ;;
+          "api1")
+            echo "host=${{ secrets.API1_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "username=${{ secrets.API1_SSH_USERNAME }}" >> $GITHUB_OUTPUT
+            echo "key=${{ secrets.API1_SSH_PRIVATE_KEY }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.API1_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "type=api" >> $GITHUB_OUTPUT
+            ;;
+          "api2")
+            echo "host=${{ secrets.API2_SSH_HOST }}" >> $GITHUB_OUTPUT
+            echo "username=${{ secrets.API2_SSH_USERNAME }}" >> $GITHUB_OUTPUT
+            echo "key=${{ secrets.API2_SSH_PRIVATE_KEY }}" >> $GITHUB_OUTPUT
+            echo "port=${{ secrets.API2_SSH_PORT || 22 }}" >> $GITHUB_OUTPUT
+            echo "type=api" >> $GITHUB_OUTPUT
+            ;;
+        esac
+        
+    - name: 部署到 ${{ matrix.server }}
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ steps.config.outputs.host }}
+        username: ${{ steps.config.outputs.username }}
+        key: ${{ steps.config.outputs.key }}
+        port: ${{ steps.config.outputs.port }}
+        envs: GITHUB_SHA,GITHUB_REF_NAME,SERVER_NAME,SERVER_TYPE,TIMESTAMP,SKIP_BACKUP
+        script: |
+          set -e
+          
+          echo "🚀 开始部署到服务器: $SERVER_NAME ($SERVER_TYPE)"
+          echo "提交 SHA: $GITHUB_SHA"
+          echo "分支: $GITHUB_REF_NAME"
+          echo "时间戳: $TIMESTAMP"
+          
+          # 创建部署目录
+          sudo mkdir -p /opt/myapp/$SERVER_TYPE
+          cd /opt/myapp/$SERVER_TYPE
+          
+          # 检查当前服务状态
+          echo "📊 检查当前服务状态..."
+          if systemctl is-active myapp-$SERVER_TYPE >/dev/null 2>&1; then
+            echo "✅ 服务 myapp-$SERVER_TYPE 正在运行"
+            current_status="running"
+          else
+            echo "⚠️ 服务 myapp-$SERVER_TYPE 未运行"
+            current_status="stopped"
+          fi
+          
+          # 备份当前版本 (如果不跳过备份)
+          if [ "$SKIP_BACKUP" != "true" ] && [ -d "current" ]; then
+            echo "📦 备份当前版本..."
+            sudo cp -r current backup-$TIMESTAMP
+            
+            # 清理旧备份 (保留最新5个)
+            sudo ls -t backup-* 2>/dev/null | tail -n +6 | xargs -r sudo rm -rf
+          fi
+          
+          # 下载新版本
+          echo "📥 下载新版本..."
+          sudo mkdir -p new-$TIMESTAMP
+          cd new-$TIMESTAMP
+          
+          # 根据服务器类型下载对应的文件
+          if [ "$SERVER_TYPE" == "web" ]; then
+            # Web 服务器部署前端文件
+            sudo wget -q "https://github.com/${{ github.repository }}/archive/$GITHUB_SHA.tar.gz" -O source.tar.gz
+            sudo tar -xzf source.tar.gz --strip-components=1
+            
+            # 构建前端
+            if command -v npm >/dev/null 2>&1; then
+              echo "🔨 构建前端..."
+              npm ci
+              npm run build
+              sudo cp -r dist/* /var/www/html/
+            fi
+            
+          elif [ "$SERVER_TYPE" == "api" ]; then
+            # API 服务器部署后端文件
+            sudo wget -q "https://github.com/${{ github.repository }}/archive/$GITHUB_SHA.tar.gz" -O source.tar.gz
+            sudo tar -xzf source.tar.gz --strip-components=1
+            
+            # 安装依赖
+            if [ -f "requirements.txt" ]; then
+              echo "🔨 安装 Python 依赖..."
+              sudo pip install -r requirements.txt
+            elif [ -f "package.json" ]; then
+              echo "🔨 安装 Node.js 依赖..."
+              sudo npm ci --production
+            fi
+          fi
+          
+          cd ..
+          
+          # 原子切换
+          echo "🔄 原子切换到新版本..."
+          if [ -d "current" ]; then
+            sudo mv current old-$TIMESTAMP
+          fi
+          sudo mv new-$TIMESTAMP current
+          
+          # 重启服务
+          echo "🔄 重启服务..."
+          if [ "$SERVER_TYPE" == "web" ]; then
+            # 重启 Nginx
+            sudo systemctl reload nginx
+            echo "✅ Nginx 配置已重新加载"
+            
+          elif [ "$SERVER_TYPE" == "api" ]; then
+            # 重启 API 服务
+            if systemctl list-unit-files | grep -q "myapp-$SERVER_TYPE.service"; then
+              sudo systemctl restart myapp-$SERVER_TYPE
+              echo "✅ API 服务已重启"
+            else
+              echo "⚠️ 服务文件不存在，跳过重启"
+            fi
+          fi
+          
+          # 健康检查
+          echo "🔍 健康检查..."
+          max_attempts=30
+          attempt=0
+          
+          while [ $attempt -lt $max_attempts ]; do
+            if [ "$SERVER_TYPE" == "web" ]; then
+              # 检查 Web 服务器
+              if curl -f http://localhost/ >/dev/null 2>&1; then
+                echo "✅ Web 服务器响应正常!"
+                break
+              fi
+            elif [ "$SERVER_TYPE" == "api" ]; then
+              # 检查 API 服务器
+              if curl -f http://localhost:8080/health >/dev/null 2>&1; then
+                echo "✅ API 服务器响应正常!"
+                break
+              fi
+            fi
+            
+            echo "⏳ 等待服务响应... ($((attempt + 1))/$max_attempts)"
+            sleep 10
+            attempt=$((attempt + 1))
+          done
+          
+          if [ $attempt -eq $max_attempts ]; then
+            echo "❌ 健康检查失败，回滚..."
+            
+            # 回滚到旧版本
+            if [ -d "old-$TIMESTAMP" ]; then
+              sudo mv current failed-$TIMESTAMP
+              sudo mv old-$TIMESTAMP current
+              
+              # 重启服务
+              if [ "$SERVER_TYPE" == "web" ]; then
+                sudo systemctl reload nginx
+              elif [ "$SERVER_TYPE" == "api" ]; then
+                sudo systemctl restart myapp-$SERVER_TYPE
+              fi
+              
+              echo "🔄 已回滚到旧版本"
+            fi
+            
+            exit 1
+          fi
+          
+          # 清理
+          echo "🧹 清理旧文件..."
+          sudo rm -rf old-$TIMESTAMP failed-* 2>/dev/null || true
+          
+          # 记录部署信息
+          sudo tee deploy-info-$TIMESTAMP.json > /dev/null << EOF
+          {
+            "deploy_time": "$(date -Iseconds)",
+            "commit_sha": "$GITHUB_SHA",
+            "branch": "$GITHUB_REF_NAME",
+            "server_name": "$SERVER_NAME",
+            "server_type": "$SERVER_TYPE",
+            "timestamp": "$TIMESTAMP",
+            "deployed_by": "${{ github.actor }}",
+            "previous_status": "$current_status"
+          }
+          EOF
+          
+          echo "🎉 部署到 $SERVER_NAME 完成!"
+      env:
+        SERVER_NAME: ${{ matrix.server }}
+        SERVER_TYPE: ${{ steps.config.outputs.type }}
+        TIMESTAMP: ${{ needs.prepare.outputs.timestamp }}
+        SKIP_BACKUP: ${{ github.event.inputs.skip_backup }}
+
+  health-check:
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-web-servers]
+    name: 全局健康检查
+    
+    steps:
+    - name: 全局服务健康检查
+      run: |
+        echo "🔍 执行全局健康检查..."
+        
+        # 定义检查的服务器和端点
+        declare -A servers=(
+          ["web1"]="http://${{ secrets.WEB1_PUBLIC_IP }}/"
+          ["web2"]="http://${{ secrets.WEB2_PUBLIC_IP }}/"
+          ["web3"]="http://${{ secrets.WEB3_PUBLIC_IP }}/"
+          ["api1"]="http://${{ secrets.API1_PUBLIC_IP }}:8080/health"
+          ["api2"]="http://${{ secrets.API2_PUBLIC_IP }}:8080/health"
+        )
+        
+        failed_servers=()
+        
+        for server in "${!servers[@]}"; do
+          url="${servers[$server]}"
+          echo "检查 $server: $url"
+          
+          if curl -f --connect-timeout 10 --max-time 30 "$url" >/dev/null 2>&1; then
+            echo "✅ $server 健康检查通过"
+          else
+            echo "❌ $server 健康检查失败"
+            failed_servers+=("$server")
+          fi
+        done
+        
+        if [ ${#failed_servers[@]} -eq 0 ]; then
+          echo "🎉 所有服务器健康检查通过!"
+        else
+          echo "⚠️ 以下服务器健康检查失败: ${failed_servers[*]}"
+          echo "::warning::健康检查失败的服务器: ${failed_servers[*]}"
+        fi
+
+  load-balancer-update:
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-web-servers, health-check]
+    name: 更新负载均衡器
+    
+    steps:
+    - name: 更新负载均衡器配置
+      uses: appleboy/ssh-action@v1.0.0
+      with:
+        host: ${{ secrets.LB_SSH_HOST }}
+        username: ${{ secrets.LB_SSH_USERNAME }}
+        key: ${{ secrets.LB_SSH_PRIVATE_KEY }}
+        port: ${{ secrets.LB_SSH_PORT || 22 }}
+        script: |
+          echo "🔄 更新负载均衡器配置..."
+          
+          # 检查所有后端服务器状态
+          backends=(
+            "${{ secrets.WEB1_PRIVATE_IP }}:80"
+            "${{ secrets.WEB2_PRIVATE_IP }}:80"
+            "${{ secrets.WEB3_PRIVATE_IP }}:80"
+          )
+          
+          api_backends=(
+            "${{ secrets.API1_PRIVATE_IP }}:8080"
+            "${{ secrets.API2_PRIVATE_IP }}:8080"
+          )
+          
+          # 生成 Nginx 上游配置
+          sudo tee /etc/nginx/conf.d/upstream.conf > /dev/null << EOF
+          upstream web_servers {
+              least_conn;
+          EOF
+          
+          # 添加可用的 Web 服务器
+          for backend in "${backends[@]}"; do
+            if curl -f --connect-timeout 5 "http://$backend/health" >/dev/null 2>&1; then
+              echo "    server $backend;" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+              echo "✅ 添加健康的 Web 服务器: $backend"
+            else
+              echo "    server $backend backup;" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+              echo "⚠️ 将故障 Web 服务器设为备用: $backend"
+            fi
+          done
+          
+          echo "}" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+          
+          # API 服务器上游配置
+          echo "upstream api_servers {" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+          echo "    least_conn;" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+          
+          for backend in "${api_backends[@]}"; do
+            if curl -f --connect-timeout 5 "http://$backend/health" >/dev/null 2>&1; then
+              echo "    server $backend;" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+              echo "✅ 添加健康的 API 服务器: $backend"
+            else
+              echo "    server $backend backup;" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+              echo "⚠️ 将故障 API 服务器设为备用: $backend"
+            fi
+          done
+          
+          echo "}" | sudo tee -a /etc/nginx/conf.d/upstream.conf
+          
+          # 测试 Nginx 配置
+          if sudo nginx -t; then
+            echo "✅ Nginx 配置测试通过"
+            sudo systemctl reload nginx
+            echo "🔄 Nginx 配置已重新加载"
+          else
+            echo "❌ Nginx 配置测试失败"
+            exit 1
+          fi
+
+  post-deploy-notifications:
+    runs-on: ubuntu-latest
+    needs: [prepare, deploy-web-servers, health-check, load-balancer-update]
+    if: always()
+    name: 部署后通知
+    
+    steps:
+    - name: 汇总部署结果
+      id: summary
+      run: |
+        echo "📊 汇总部署结果..."
+        
+        # 检查各个作业的状态
+        if [ "${{ needs.deploy-web-servers.result }}" == "success" ]; then
+          echo "✅ 多服务器部署: 成功"
+          deploy_status="success"
+        else
+          echo "❌ 多服务器部署: 失败"
+          deploy_status="failed"
+        fi
+        
+        if [ "${{ needs.health-check.result }}" == "success" ]; then
+          echo "✅ 健康检查: 通过"
+        else
+          echo "❌ 健康检查: 失败"
+        fi
+        
+        if [ "${{ needs.load-balancer-update.result }}" == "success" ]; then
+          echo "✅ 负载均衡器更新: 成功"
+        else
+          echo "❌ 负载均衡器更新: 失败"
+        fi
+        
+        echo "deploy_status=$deploy_status" >> $GITHUB_OUTPUT
+        
+    - name: 发送部署通知
+      uses: 8398a7/action-slack@v3
+      with:
+        status: custom
+        custom_payload: |
+          {
+            "text": "🚀 多服务器部署完成",
+            "attachments": [
+              {
+                "color": "${{ steps.summary.outputs.deploy_status == 'success' && 'good' || 'danger' }}",
+                "fields": [
+                  {
+                    "title": "部署状态",
+                    "value": "${{ steps.summary.outputs.deploy_status }}",
+                    "short": true
+                  },
+                  {
+                    "title": "提交",
+                    "value": "${{ github.sha }}",
+                    "short": true
+                  },
+                  {
+                    "title": "分支",
+                    "value": "${{ github.ref_name }}",
+                    "short": true
+                  },
+                  {
+                    "title": "操作者",
+                    "value": "${{ github.actor }}",
+                    "short": true
+                  },
+                  {
+                    "title": "时间戳",
+                    "value": "${{ needs.prepare.outputs.timestamp }}",
+                    "short": true
+                  }
+                ]
+              }
+            ]
+          }
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
