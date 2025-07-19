@@ -5,11 +5,12 @@
 # 默认目标
 help:
 	@echo "可用的命令:"
-	@echo "  install    - 安装项目依赖"
-	@echo "  clean      - 清理临时文件"
-	@echo "  build      - 构建 Docker 镜像"
-	@echo "  run        - 本地运行工作流"
-	@echo "  deploy     - 部署工作流"
+	@echo "  install           - 安装项目依赖"
+	@echo "  clean             - 清理临时文件"
+	@echo "  build             - 构建 Docker 镜像（简化版）"
+	@echo "  build-with-docker - 构建包含Docker CLI的镜像"
+	@echo "  run               - 本地运行工作流"
+	@echo "  deploy            - 部署工作流"
 
 # 安装依赖
 install:
@@ -24,6 +25,10 @@ clean:
 # 构建 Docker 镜像
 build:
 	docker build -t cicd-example .
+
+# 构建包含Docker CLI的镜像
+build-with-docker:
+	docker build -f Dockerfile.with-docker -t cicd-example:with-docker .
 
 # 本地运行工作流
 run:

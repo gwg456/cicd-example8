@@ -71,9 +71,16 @@ DEPLOY_MODE=true python flow.py
 
 ### Docker 运行
 
+项目提供两个Dockerfile选择：
+- `Dockerfile`: 简化版本，体积更小，推荐使用
+- `Dockerfile.with-docker`: 包含Docker CLI，如果需要在容器内操作Docker时使用
+
 ```bash
-# 构建镜像
+# 构建镜像（简化版，推荐）
 docker build -t cicd-example .
+
+# 或构建包含Docker CLI的镜像（如果需要）
+docker build -f Dockerfile.with-docker -t cicd-example:with-docker .
 
 # 运行容器
 docker run --rm \
@@ -99,7 +106,8 @@ cicd-example/
 │       └── deploy-prefect-flow.yaml  # CI/CD 配置
 ├── flow.py                           # 主要工作流代码
 ├── config.py                         # 配置管理文件
-├── Dockerfile                        # Docker 镜像配置
+├── Dockerfile                        # Docker 镜像配置（简化版）
+├── Dockerfile.with-docker            # Docker 镜像配置（包含Docker CLI）
 ├── requirements.txt                  # Python 依赖
 ├── Makefile                          # 构建命令
 ├── README.md                         # 项目文档
