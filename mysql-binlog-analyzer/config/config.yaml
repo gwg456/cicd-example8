@@ -1,0 +1,394 @@
+# ========================================
+# MySQL Binlog 数据分析系统配置文件
+# ========================================
+
+# MySQL数据库配置
+mysql:
+  # 源数据库配置（读取binlog）
+  source:
+    host: "localhost"
+    port: 3306
+    user: "binlog_reader"
+    password: "BinlogReader2024!"
+    charset: "utf8mb4"
+    
+    # Binlog配置
+    binlog:
+      server_id: 1001  # 唯一server_id，避免与其他复制节点冲突
+      log_file: ""     # 起始文件，空表示从最新开始
+      log_pos: 4       # 起始位置
+      auto_position: true  # 是否使用GTID自动定位
+      
+  # 存储数据库配置
+  storage:
+    host: "localhost"
+    port: 3306
+    user: "storage_user"
+    password: "StorageUser2024!"
+    database: "binlog_analysis"
+    charset: "utf8mb4"
+    
+    # 连接池配置
+    pool:
+      max_connections: 10
+      min_connections: 2
+      connection_timeout: 30
+      auto_commit: true
+
+# 监控表配置
+tables:
+  # 目标表列表
+  target_tables:
+    - database: "ecommerce"
+      table: "users"
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      track_columns: ["id", "username", "email", "phone", "status", "created_at", "updated_at"]
+      sensitive_columns: ["phone", "email"]
+      primary_key: "id"
+      description: "用户基础信息表"
+      
+    - database: "ecommerce"
+      table: "orders"
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      track_columns: ["id", "user_id", "amount", "status", "created_at", "updated_at"]
+      primary_key: "id"
+      description: "订单表"
+      
+    - database: "ecommerce"
+      table: "products"
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      track_columns: ["id", "name", "price", "stock", "category_id"]
+      primary_key: "id"
+      description: "商品表"
+      
+    - database: "finance"
+      table: "transactions"
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      track_columns: ["id", "user_id", "amount", "type", "status"]
+      sensitive_columns: ["amount"]
+      primary_key: "id"
+      description: "财务交易表"
+      
+    - database: "ecommerce"
+      table: "user_profiles"
+      operations: ["INSERT", "UPDATE", "DELETE"]
+      track_columns: ["id", "user_id", "real_name", "id_card", "address"]
+      sensitive_columns: ["real_name", "id_card", "address"]
+      primary_key: "id"
+      description: "用户详细信息表"
+
+  # 忽略的表
+  ignored_tables:
+    - "mysql.*"
+    - "information_schema.*"
+    - "performance_schema.*"
+    - "sys.*"
+    - "*.logs"
+    - "*.cache"
+    - "*_backup"
+    - "*_temp"
+
+# 处理配置
+processing:
+  # 队列大小
+  queue_size: 10000
+  
+  # 批处理配置
+  batch_size: 1000
+  flush_interval: 5  # 秒
+  
+  # 线程配置
+  worker_threads: 4
+  reader_threads: 2
+  storage_threads: 2
+  
+  # 检查点配置
+  checkpoint_interval: 60  # 秒
+  
+  # 错误处理
+  max_retries: 3
+  retry_delay: 5  # 秒
+  
+  # 内存管理
+  max_memory_usage: "1GB"
+  gc_threshold: 50000
+
+# 存储配置
+storage:
+  # 主存储
+  primary: "mysql"  # mysql, elasticsearch, clickhouse
+  
+  # 备份存储
+  backup: ["elasticsearch"]
+  
+  # 数据保留
+  retention_days: 90
+  
+  # 表配置
+  tables:
+    changes: "binlog_changes"
+    statistics: "binlog_statistics"
+    position: "binlog_position"
+  
+  # 分区配置
+  partitioning:
+    enabled: true
+    strategy: "monthly"  # daily, weekly, monthly
+    
+  # 压缩配置
+  compression:
+    enabled: true
+    algorithm: "gzip"
+
+# Elasticsearch配置（可选）
+elasticsearch:
+  enabled: false
+  hosts: ["localhost:9200"]
+  index_prefix: "mysql_binlog"
+  
+  # 索引配置
+  index_settings:
+    number_of_shards: 1
+    number_of_replicas: 0
+    refresh_interval: "5s"
+  
+  # 映射配置
+  mappings:
+    dynamic: true
+    date_detection: true
+
+# ClickHouse配置（可选）
+clickhouse:
+  enabled: false
+  host: "localhost"
+  port: 9000
+  user: "default"
+  password: ""
+  database: "binlog_analysis"
+  
+  # 表引擎
+  engine: "MergeTree"
+  partition_by: "toYYYYMM(timestamp)"
+  order_by: "timestamp"
+
+# Redis配置（可选，用于缓存）
+redis:
+  enabled: false
+  host: "localhost"
+  port: 6379
+  db: 0
+  password: ""
+  
+  # 缓存配置
+  cache:
+    ttl: 3600  # 秒
+    max_keys: 100000
+
+# API配置
+api:
+  # REST API
+  rest:
+    enabled: true
+    host: "0.0.0.0"
+    port: 8080
+    debug: false
+    
+    # CORS配置
+    cors:
+      origins: ["*"]
+      methods: ["GET", "POST", "PUT", "DELETE"]
+      headers: ["Content-Type", "Authorization"]
+  
+  # GraphQL
+  graphql:
+    enabled: true
+    endpoint: "/graphql"
+    playground: true
+  
+  # 认证配置
+  auth:
+    enabled: false
+    jwt_secret: "your-secret-key"
+    token_expiry: 3600
+
+# Web UI配置
+web_ui:
+  enabled: true
+  host: "0.0.0.0"
+  port: 8081
+  
+  # 静态文件
+  static_folder: "static"
+  template_folder: "templates"
+  
+  # 实时更新
+  realtime:
+    enabled: true
+    websocket_port: 8082
+
+# 日志配置
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name} | {message}"
+  
+  # 文件配置
+  file:
+    enabled: true
+    path: "/var/log/mysql-binlog-analyzer/"
+    filename: "analyzer.log"
+    rotation: "500 MB"
+    retention: "30 days"
+    compression: "gz"
+  
+  # 控制台输出
+  console:
+    enabled: true
+    colorize: true
+  
+  # 日志级别配置
+  loggers:
+    "pymysqlreplication": "WARNING"
+    "urllib3": "WARNING"
+    "elasticsearch": "INFO"
+
+# 监控配置
+monitoring:
+  # Prometheus指标
+  prometheus:
+    enabled: false
+    port: 9090
+    path: "/metrics"
+  
+  # 健康检查
+  health_check:
+    enabled: true
+    port: 8083
+    path: "/health"
+    
+  # 性能监控
+  performance:
+    enabled: true
+    collection_interval: 60  # 秒
+    
+    # 关键指标
+    metrics:
+      - "events_per_second"
+      - "binlog_lag_seconds"
+      - "queue_size"
+      - "memory_usage"
+      - "error_rate"
+
+# 告警配置
+alerts:
+  # 邮件告警
+  email:
+    enabled: false
+    smtp_server: "smtp.gmail.com"
+    smtp_port: 587
+    username: "your-email@gmail.com"
+    password: "your-app-password"
+    sender: "MySQL Binlog Analyzer <noreply@company.com>"
+    recipients:
+      - "admin@company.com"
+      - "ops@company.com"
+  
+  # Webhook告警
+  webhook:
+    enabled: false
+    url: "https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK"
+    timeout: 30
+    
+    # 重试配置
+    retries: 3
+    retry_delay: 5
+  
+  # 告警规则
+  rules:
+    - name: "binlog_lag_high"
+      condition: "binlog_lag_seconds > 300"
+      severity: "warning"
+      message: "Binlog处理延迟超过5分钟"
+      
+    - name: "error_rate_high"
+      condition: "error_rate > 0.05"
+      severity: "error"
+      message: "错误率超过5%"
+      
+    - name: "queue_size_high"
+      condition: "queue_size > 8000"
+      severity: "warning"
+      message: "队列大小超过阈值"
+      
+    - name: "memory_usage_high"
+      condition: "memory_usage > 0.8"
+      severity: "warning"
+      message: "内存使用率超过80%"
+
+# 安全配置
+security:
+  # 数据脱敏
+  data_masking:
+    enabled: true
+    
+    # 脱敏规则
+    rules:
+      phone: "mask_phone"
+      email: "mask_email"
+      id_card: "mask_id_card"
+      password: "mask_all"
+      
+  # 访问控制
+  access_control:
+    enabled: false
+    whitelist_ips: []
+    blacklist_ips: []
+    
+  # SSL/TLS
+  ssl:
+    enabled: false
+    cert_file: "/path/to/cert.pem"
+    key_file: "/path/to/key.pem"
+
+# 性能优化配置
+performance:
+  # 预读配置
+  prefetch:
+    enabled: true
+    size: 1000
+    
+  # 缓存配置
+  cache:
+    enabled: true
+    size: "256MB"
+    ttl: 3600
+    
+  # 并发配置
+  concurrency:
+    max_workers: 10
+    queue_timeout: 30
+    
+  # 内存配置
+  memory:
+    buffer_size: "64MB"
+    flush_threshold: 0.8
+    
+  # 网络配置
+  network:
+    connection_timeout: 30
+    read_timeout: 60
+    keepalive: true
+
+# 开发配置
+development:
+  # 调试模式
+  debug: false
+  
+  # 测试配置
+  testing:
+    enabled: false
+    mock_data: false
+    
+  # 性能分析
+  profiling:
+    enabled: false
+    output_dir: "/tmp/profiling"

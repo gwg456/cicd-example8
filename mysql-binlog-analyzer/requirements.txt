@@ -1,0 +1,96 @@
+# ========================================
+# MySQL Binlog 数据分析系统依赖包
+# ========================================
+
+# 核心MySQL相关
+PyMySQL>=1.0.2,<2.0
+mysql-replication>=0.22,<1.0
+sqlparse>=0.4.2,<1.0
+
+# 数据处理
+PyYAML>=5.4.1,<7.0
+python-dateutil>=2.8.0,<3.0
+loguru>=0.6.0,<1.0
+
+# 异步和并发
+aiofiles>=0.8.0,<1.0
+asyncio-mqtt>=0.13.0,<1.0
+
+# Web API框架
+Flask>=2.2.0,<3.0
+Flask-CORS>=3.0.0,<5.0
+Flask-RESTful>=0.3.9,<1.0
+requests>=2.25.0,<3.0
+
+# GraphQL支持
+graphene>=3.1.0,<4.0
+flask-graphql>=2.0.0,<3.0
+
+# 数据存储
+elasticsearch>=7.15.0,<9.0
+clickhouse-driver>=0.2.0,<1.0
+redis>=4.3.0,<5.0
+
+# 数据格式处理
+orjson>=3.6.0,<4.0
+msgpack>=1.0.0,<2.0
+protobuf>=3.20.0,<5.0
+
+# 缓存和队列
+celery>=5.2.0,<6.0
+kombu>=5.2.0,<6.0
+
+# 监控和指标
+prometheus-client>=0.14.0,<1.0
+psutil>=5.8.0,<6.0
+
+# 配置管理
+configparser>=5.2.0
+python-dotenv>=0.19.0,<2.0
+
+# 数据验证
+pydantic>=1.10.0,<3.0
+marshmallow>=3.15.0,<4.0
+
+# 测试
+pytest>=7.0.0,<8.0
+pytest-asyncio>=0.21.0,<1.0
+pytest-cov>=4.0.0,<5.0
+
+# 类型检查
+mypy>=0.991,<2.0
+types-PyMySQL>=1.0.0,<2.0
+types-PyYAML>=6.0.0,<7.0
+
+# 代码格式化
+black>=22.0.0,<24.0
+isort>=5.10.0,<6.0
+flake8>=4.0.0,<7.0
+
+# 文档生成
+Sphinx>=5.0.0,<8.0
+sphinx-rtd-theme>=1.0.0,<3.0
+
+# 数据分析（可选）
+pandas>=1.5.0,<3.0
+numpy>=1.21.0,<2.0
+matplotlib>=3.5.0,<4.0
+
+# 机器学习（可选，用于异常检测）
+scikit-learn>=1.1.0,<2.0
+
+# 加密和安全
+cryptography>=3.4.8,<42.0
+bcrypt>=3.2.0,<5.0
+
+# 网络工具
+dnspython>=2.2.0,<3.0
+urllib3>=1.26.0,<3.0
+
+# 系统工具
+schedule>=1.2.0,<2.0
+click>=8.0.0,<9.0
+
+# 开发工具
+ipython>=8.0.0,<9.0
+jupyter>=1.0.0,<2.0
