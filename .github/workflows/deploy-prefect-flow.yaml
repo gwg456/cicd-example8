@@ -26,6 +26,20 @@ jobs:
           echo "📋 当前配置:"
           tail -10 /etc/hosts
 
+      - name: Extract Docker Hub hosts entries
+        run: |
+          # 提取Docker Hub相关的hosts条目
+          echo "提取Docker Hub hosts配置..."
+          grep -E "(docker\.io|docker\.com)" /etc/hosts > docker-hub-hosts.txt || true
+          echo "Docker Hub hosts entries:"
+          cat docker-hub-hosts.txt || echo "No Docker Hub entries found"
+          
+          # 创建构建时用的hosts文件
+          echo "# Docker Hub hosts for container build" > build-hosts.txt
+          cat docker-hub-hosts.txt >> build-hosts.txt || true
+          echo "Build hosts file content:"
+          cat build-hosts.txt
+
       - name: Configure Docker daemon for China mainland
         run: |
           # 配置Docker镜像加速器
@@ -88,6 +102,17 @@ jobs:
           platforms: linux/amd64
           network: host
           load: true
+          build-args: |
+            BUILDKIT_INLINE_CACHE=1
+          allow: |
+            network.host
+            security.insecure
+          add-hosts: |
+            registry-1.docker.io:52.4.71.198
+            auth.docker.io:54.85.56.253
+            production.cloudflare.docker.com:52.72.232.213
+            index.docker.io:52.1.38.175
+            registry.docker.io:52.4.71.198
         timeout-minutes: 20
 
       - name: Deploy using the built image
@@ -100,5 +125,7 @@ jobs:
             -e WORK_POOL_NAME=my-docker-pool2 \
             -e DEPLOY_MODE=true \
             -v /var/run/docker.sock:/var/run/docker.sock \
+            --add-host registry-1.docker.io:52.4.71.198 \
+            --add-host auth.docker.io:54.85.56.253 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
         timeout-minutes: 10
