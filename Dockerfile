@@ -1,6 +1,13 @@
-FROM python:3.12-slim
+FROM registry.cn-hangzhou.aliyuncs.com/library/python:3.12-slim
 
 WORKDIR /app
+
+# 更换apt源为阿里云
+RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+
+# 配置pip使用阿里云源
+COPY pip.conf /etc/pip.conf
 
 # 复制并安装Python依赖
 COPY requirements.txt .
