@@ -191,22 +191,54 @@ deploy_frontend() {
     npm install
     
     # 创建生产环境配置
-    cat > .env.production << EOF
-VITE_API_BASE_URL=https://$DOMAIN
+    cat > .env.production.local << EOF
+# 生产环境配置
+# 如果API和前端在同一域名下，留空VITE_API_BASE_URL
+# 如果API在不同服务器，请设置完整URL
+VITE_API_BASE_URL=
 VITE_APP_TITLE=用户认证系统
 VITE_APP_VERSION=1.0.0
+VITE_DEBUG=false
 EOF
 
+    log_info "生产环境配置:"
+    log_info "  - 前端域名: https://$DOMAIN"
+    log_info "  - API地址: https://$DOMAIN/api"
+    log_info "  - 配置文件: .env.production.local"
+    
     # 构建生产版本
-    npm run build
+    NODE_ENV=production npm run build
     
     # 部署到Web目录
     mkdir -p $WEB_DIR
     cp -r dist/* $WEB_DIR/
     
+    # 创建API错误页面
+    mkdir -p $WEB_DIR/../error_pages
+    cat > $WEB_DIR/../error_pages/api_error.html << 'EOF'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>API服务暂时不可用</title>
+    <meta charset="utf-8">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 50px; }
+        .error { color: #e74c3c; }
+    </style>
+</head>
+<body>
+    <h1 class="error">API服务暂时不可用</h1>
+    <p>我们正在努力修复这个问题，请稍后再试。</p>
+    <p><a href="/">返回首页</a></p>
+</body>
+</html>
+EOF
+
     # 设置权限
     chown -R www-data:www-data $WEB_DIR
     chmod -R 755 $WEB_DIR
+    chown -R www-data:www-data $WEB_DIR/../error_pages
+    chmod -R 755 $WEB_DIR/../error_pages
     
     log_success "前端部署完成"
 }
