@@ -1,0 +1,539 @@
+# GitLab CI/CD 配置文件
+# 自动生成 PDF 文档并发布到 GitLab Pages
+
+stages:
+  - install
+  - build
+  - test
+  - deploy
+  - release
+
+variables:
+  # Python 版本
+  PYTHON_VERSION: "3.11"
+  # 输出目录
+  OUTPUT_DIR: "public"
+  # PDF 目录
+  PDF_DIR: "pdfs"
+  # 项目名称
+  PROJECT_NAME: "GitHub Actions SSH 使用指南"
+
+# 缓存配置
+cache:
+  paths:
+    - .cache/pip
+    - venv/
+
+# 安装依赖
+install-dependencies:
+  stage: install
+  image: python:${PYTHON_VERSION}-slim
+  before_script:
+    - apt-get update
+    - apt-get install -y 
+        build-essential 
+        libcairo2-dev 
+        libpango1.0-dev 
+        libgdk-pixbuf2.0-dev 
+        libffi-dev 
+        shared-mime-info 
+        ghostscript 
+        fonts-noto-cjk 
+        fonts-noto-color-emoji
+        curl
+        git
+  script:
+    - python -m venv venv
+    - source venv/bin/activate
+    - pip install --upgrade pip
+    - pip install -r requirements.txt
+    - pip list
+  artifacts:
+    paths:
+      - venv/
+    expire_in: 1 hour
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 生成 PDF 文档
+generate-pdf:
+  stage: build
+  image: python:${PYTHON_VERSION}-slim
+  dependencies:
+    - install-dependencies
+  before_script:
+    - apt-get update
+    - apt-get install -y 
+        libcairo2-dev 
+        libpango1.0-dev 
+        libgdk-pixbuf2.0-dev 
+        libffi-dev 
+        ghostscript
+        fonts-noto-cjk
+  script:
+    - source venv/bin/activate
+    - echo "🔄 开始生成 PDF 文档..."
+    
+    # 创建输出目录
+    - mkdir -p ${OUTPUT_DIR}/${PDF_DIR}
+    
+    # 生成主要 PDF 文档
+    - python3 scripts/generate-pdf.py README.md -o "${OUTPUT_DIR}/${PDF_DIR}/GitHub-Actions-SSH-指南.pdf"
+    
+    # 批量生成所有 Markdown 文件的 PDF
+    - find . -name "*.md" -not -path "./venv/*" -not -path "./.git/*" | while read -r md_file; do
+        filename=$(basename "$md_file" .md)
+        echo "生成 PDF: $md_file -> ${filename}.pdf"
+        python3 scripts/generate-pdf.py "$md_file" -o "${OUTPUT_DIR}/${PDF_DIR}/${filename}.pdf" || echo "跳过: $md_file"
+      done
+    
+    # 生成 HTML 版本
+    - mkdir -p ${OUTPUT_DIR}/html
+    - python3 -c "
+import markdown
+import os
+from datetime import datetime
+
+# 读取 README
+with open('README.md', 'r', encoding='utf-8') as f:
+    content = f.read()
+
+# 转换为 HTML
+md = markdown.Markdown(extensions=['codehilite', 'fenced_code', 'tables', 'toc', 'attr_list'])
+html_content = md.convert(content)
+
+# 生成完整 HTML
+full_html = f'''<!DOCTYPE html>
+<html lang=\"zh-CN\">
+<head>
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>GitHub Actions SSH 使用指南</title>
+    <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/github-markdown-css/5.2.0/github-markdown-light.min.css\">
+    <link rel=\"stylesheet\" href=\"https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github.min.css\">
+    <style>
+        .markdown-body {{ 
+            box-sizing: border-box; 
+            min-width: 200px; 
+            max-width: 980px; 
+            margin: 0 auto; 
+            padding: 45px; 
+        }}
+        .footer {{
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e1e4e8;
+            text-align: center;
+            color: #586069;
+            font-size: 14px;
+        }}
+    </style>
+</head>
+<body>
+    <article class=\"markdown-body\">
+        {html_content}
+        <div class=\"footer\">
+            <p>文档生成时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}</p>
+            <p>GitLab CI/CD 自动生成</p>
+        </div>
+    </article>
+</body>
+</html>'''
+
+# 保存 HTML
+with open('${OUTPUT_DIR}/html/index.html', 'w', encoding='utf-8') as f:
+    f.write(full_html)
+print('✅ HTML 文档生成完成')
+"
+    
+    # 生成文档索引页面
+    - python3 -c "
+import os
+import json
+from datetime import datetime
+
+# 获取所有 PDF 文件
+pdf_files = []
+pdf_dir = '${OUTPUT_DIR}/${PDF_DIR}'
+if os.path.exists(pdf_dir):
+    for file in os.listdir(pdf_dir):
+        if file.endswith('.pdf'):
+            file_path = os.path.join(pdf_dir, file)
+            file_size = os.path.getsize(file_path)
+            pdf_files.append({
+                'name': file.replace('.pdf', '').replace('-', ' '),
+                'filename': file,
+                'size': f'{file_size / 1024:.1f} KB',
+                'path': f'${PDF_DIR}/{file}'
+            })
+
+# 生成索引页面
+index_html = f'''<!DOCTYPE html>
+<html lang=\"zh-CN\">
+<head>
+    <meta charset=\"UTF-8\">
+    <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">
+    <title>${PROJECT_NAME} - 文档中心</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f8f9fa;
+        }}
+        
+        .header {{
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+        }}
+        
+        .header h1 {{
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }}
+        
+        .header p {{
+            margin: 10px 0 0 0;
+            font-size: 1.2em;
+            opacity: 0.9;
+        }}
+        
+        .stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }}
+        
+        .stat-card {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }}
+        
+        .stat-number {{
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }}
+        
+        .documents {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }}
+        
+        .doc-card {{
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+        
+        .doc-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+        }}
+        
+        .doc-title {{
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #2c3e50;
+        }}
+        
+        .doc-meta {{
+            color: #7f8c8d;
+            font-size: 0.9em;
+            margin-bottom: 15px;
+        }}
+        
+        .doc-actions {{
+            display: flex;
+            gap: 10px;
+        }}
+        
+        .btn {{
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            text-decoration: none;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            flex: 1;
+            text-align: center;
+        }}
+        
+        .btn-primary {{
+            background-color: #667eea;
+            color: white;
+        }}
+        
+        .btn-primary:hover {{
+            background-color: #5a6fd8;
+        }}
+        
+        .btn-secondary {{
+            background-color: #95a5a6;
+            color: white;
+        }}
+        
+        .btn-secondary:hover {{
+            background-color: #7f8c8d;
+        }}
+        
+        .footer {{
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px;
+            background: white;
+            border-radius: 8px;
+            color: #7f8c8d;
+        }}
+        
+        .navigation {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }}
+        
+        .nav-links {{
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+        }}
+        
+        .nav-link {{
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }}
+        
+        .nav-link:hover {{
+            text-decoration: underline;
+        }}
+    </style>
+</head>
+<body>
+    <div class=\"header\">
+        <h1>📚 ${PROJECT_NAME}</h1>
+        <p>完整的 SSH 密钥配置与自动化部署指南</p>
+    </div>
+    
+    <div class=\"navigation\">
+        <div class=\"nav-links\">
+            <a href=\"html/index.html\" class=\"nav-link\">📖 在线阅读</a>
+            <a href=\"#documents\" class=\"nav-link\">📄 PDF 下载</a>
+            <a href=\"https://gitlab.com/your-username/your-project\" class=\"nav-link\">🔗 源码仓库</a>
+        </div>
+    </div>
+    
+    <div class=\"stats\">
+        <div class=\"stat-card\">
+            <div class=\"stat-number\">{len(pdf_files)}</div>
+            <div>PDF 文档</div>
+        </div>
+        <div class=\"stat-card\">
+            <div class=\"stat-number\">{sum(float(f['size'].replace(' KB', '')) for f in pdf_files):.0f}</div>
+            <div>总大小 (KB)</div>
+        </div>
+        <div class=\"stat-card\">
+            <div class=\"stat-number\">{datetime.now().strftime('%m-%d')}</div>
+            <div>更新日期</div>
+        </div>
+    </div>
+    
+    <h2 id=\"documents\">📄 文档下载</h2>
+    <div class=\"documents\">'''
+
+for pdf in pdf_files:
+    index_html += f'''
+        <div class=\"doc-card\">
+            <div class=\"doc-title\">{pdf['name']}</div>
+            <div class=\"doc-meta\">📦 {pdf['size']} • PDF 格式</div>
+            <div class=\"doc-actions\">
+                <a href=\"{pdf['path']}\" class=\"btn btn-primary\" target=\"_blank\">📖 预览</a>
+                <a href=\"{pdf['path']}\" class=\"btn btn-secondary\" download>💾 下载</a>
+            </div>
+        </div>'''
+
+index_html += f'''
+    </div>
+    
+    <div class=\"footer\">
+        <p>📅 文档生成时间: {datetime.now().strftime('%Y年%m月%d日 %H:%M:%S')}</p>
+        <p>🤖 GitLab CI/CD 自动生成 • 版本: {os.environ.get('CI_COMMIT_SHORT_SHA', 'unknown')}</p>
+    </div>
+</body>
+</html>'''
+
+# 保存索引页面
+with open('${OUTPUT_DIR}/index.html', 'w', encoding='utf-8') as f:
+    f.write(index_html)
+
+print(f'✅ 索引页面生成完成，包含 {len(pdf_files)} 个 PDF 文档')
+"
+    
+    # 显示生成的文件
+    - echo "📊 生成的文件列表:"
+    - find ${OUTPUT_DIR} -type f -name "*.pdf" -o -name "*.html" | sort
+    - echo ""
+    - echo "📦 文件大小统计:"
+    - du -sh ${OUTPUT_DIR}/*
+    
+  artifacts:
+    paths:
+      - ${OUTPUT_DIR}/
+    expire_in: 1 week
+    reports:
+      # 生成工件报告
+      junit: ${OUTPUT_DIR}/test-results.xml
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 测试 PDF 生成
+test-pdf-generation:
+  stage: test
+  image: python:${PYTHON_VERSION}-slim
+  dependencies:
+    - generate-pdf
+  script:
+    - echo "🧪 测试 PDF 文件..."
+    
+    # 检查 PDF 文件是否存在
+    - |
+      if [ ! -d "${OUTPUT_DIR}/${PDF_DIR}" ]; then
+        echo "❌ PDF 目录不存在"
+        exit 1
+      fi
+    
+    # 检查主要 PDF 文件
+    - |
+      if [ ! -f "${OUTPUT_DIR}/${PDF_DIR}/GitHub-Actions-SSH-指南.pdf" ]; then
+        echo "❌ 主要 PDF 文件不存在"
+        exit 1
+      fi
+    
+    # 验证 PDF 文件不为空
+    - |
+      for pdf in ${OUTPUT_DIR}/${PDF_DIR}/*.pdf; do
+        if [ -f "$pdf" ]; then
+          size=$(stat -c%s "$pdf")
+          if [ $size -lt 1024 ]; then
+            echo "❌ PDF 文件太小: $pdf ($size bytes)"
+            exit 1
+          else
+            echo "✅ PDF 文件正常: $(basename "$pdf") ($size bytes)"
+          fi
+        fi
+      done
+    
+    # 检查 HTML 文件
+    - |
+      if [ ! -f "${OUTPUT_DIR}/index.html" ]; then
+        echo "❌ 索引页面不存在"
+        exit 1
+      fi
+    
+    - echo "✅ 所有测试通过"
+  only:
+    - main
+    - develop
+    - merge_requests
+
+# 部署到 GitLab Pages
+pages:
+  stage: deploy
+  dependencies:
+    - generate-pdf
+  script:
+    - echo "🚀 部署到 GitLab Pages..."
+    - echo "📂 部署目录内容:"
+    - ls -la ${OUTPUT_DIR}/
+  artifacts:
+    paths:
+      - public
+  only:
+    - main
+
+# 创建 Release
+create-release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  dependencies:
+    - generate-pdf
+  script:
+    - echo "📦 创建发布版本..."
+    
+    # 生成发布说明
+    - |
+      cat > release_notes.md << EOF
+      # GitHub Actions SSH 使用指南 v${CI_COMMIT_SHORT_SHA}
+      
+      ## 📄 包含文档
+      EOF
+    
+    # 添加 PDF 文件列表到发布说明
+    - |
+      echo "" >> release_notes.md
+      echo "### PDF 文档" >> release_notes.md
+      for pdf in ${OUTPUT_DIR}/${PDF_DIR}/*.pdf; do
+        if [ -f "$pdf" ]; then
+          filename=$(basename "$pdf")
+          size=$(stat -c%s "$pdf")
+          echo "- 📄 $filename ($(echo "scale=1; $size/1024" | bc) KB)" >> release_notes.md
+        fi
+      done
+    
+    - |
+      echo "" >> release_notes.md
+      echo "## 📊 统计信息" >> release_notes.md
+      echo "- 🕒 生成时间: $(date)" >> release_notes.md
+      echo "- 🔨 构建版本: ${CI_COMMIT_SHORT_SHA}" >> release_notes.md
+      echo "- 📦 总文件数: $(find ${OUTPUT_DIR} -name "*.pdf" | wc -l) 个 PDF" >> release_notes.md
+      echo "- 💾 总大小: $(du -sh ${OUTPUT_DIR} | cut -f1)" >> release_notes.md
+    
+    - cat release_notes.md
+    
+  release:
+    name: 'GitHub Actions SSH 指南 v$CI_COMMIT_SHORT_SHA'
+    description: release_notes.md
+    tag_name: 'v$CI_COMMIT_SHORT_SHA'
+    assets:
+      links:
+        - name: '📚 在线文档'
+          url: '$CI_PAGES_URL'
+        - name: '📄 PDF 下载'
+          url: '$CI_PAGES_URL/pdfs/GitHub-Actions-SSH-指南.pdf'
+  only:
+    - main
+  when: manual
+
+# 清理旧的工件
+cleanup:
+  stage: release
+  script:
+    - echo "🧹 清理完成"
+  after_script:
+    - echo "清理旧的 artifacts 和缓存"
+  only:
+    - schedules
+  when: manual
