@@ -5,7 +5,7 @@
 ## 🚀 项目特性
 
 - **自动化部署**: 通过 GitHub Actions 实现代码提交到自动部署的完整 CI/CD 流程
-- **容器化**: 使用 Docker 确保环境一致性和可移植性
+- **容器化**: 使用 Docker 确保环境一致性和可移植性，使用阿里云镜像源加速构建
 - **工作流编排**: 基于 Prefect 的强大工作流编排能力
 - **定时调度**: 支持定时执行工作流任务
 - **错误处理**: 完善的错误处理和超时机制
@@ -71,9 +71,16 @@ DEPLOY_MODE=true python flow.py
 
 ### Docker 运行
 
+项目提供两个Dockerfile选择（均使用阿里云镜像源加速）：
+- `Dockerfile`: 简化版本，体积更小，推荐使用
+- `Dockerfile.with-docker`: 包含Docker CLI，如果需要在容器内操作Docker时使用
+
 ```bash
-# 构建镜像
+# 构建镜像（简化版，推荐）
 docker build -t cicd-example .
+
+# 或构建包含Docker CLI的镜像（如果需要）
+docker build -f Dockerfile.with-docker -t cicd-example:with-docker .
 
 # 运行容器
 docker run --rm \
@@ -99,7 +106,9 @@ cicd-example/
 │       └── deploy-prefect-flow.yaml  # CI/CD 配置
 ├── flow.py                           # 主要工作流代码
 ├── config.py                         # 配置管理文件
-├── Dockerfile                        # Docker 镜像配置
+├── Dockerfile                        # Docker 镜像配置（简化版）
+├── Dockerfile.with-docker            # Docker 镜像配置（包含Docker CLI）
+├── pip.conf                          # pip阿里云源配置
 ├── requirements.txt                  # Python 依赖
 ├── Makefile                          # 构建命令
 ├── README.md                         # 项目文档
