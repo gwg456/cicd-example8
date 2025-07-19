@@ -98,8 +98,10 @@ cicd-example/
 │   └── workflows/
 │       └── deploy-prefect-flow.yaml  # CI/CD 配置
 ├── flow.py                           # 主要工作流代码
+├── config.py                         # 配置管理文件
 ├── Dockerfile                        # Docker 镜像配置
 ├── requirements.txt                  # Python 依赖
+├── Makefile                          # 构建命令
 ├── README.md                         # 项目文档
 └── .gitignore                        # Git 忽略文件
 ```
