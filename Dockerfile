@@ -1,12 +1,20 @@
-FROM registry.cn-hangzhou.aliyuncs.com/library/python:3.12-slim
+# 使用官方Python镜像
+# 如果在中国大陆需要加速，可以配置Docker镜像加速器：
+# - 阿里云: https://help.aliyun.com/document_detail/60750.html
+# - 网易云: http://hub-mirror.c.163.com
+# - 腾讯云: https://mirror.ccs.tencentyun.com
+# 或者使用以下镜像源替换：
+# - 网易: hub.c.163.com/library/python:3.12-slim  
+# - DaoCloud: daocloud.io/library/python:3.12-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-# 更换apt源为阿里云
-RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources \
-    && sed -i 's/security.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
+# 更换apt源为清华大学源（更稳定）
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's/security.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
 
-# 配置pip使用阿里云源
+# 配置pip使用清华大学源
 COPY pip.conf /etc/pip.conf
 
 # 复制并安装Python依赖
