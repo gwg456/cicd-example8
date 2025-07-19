@@ -130,6 +130,31 @@ class BinlogCollector:
             logger.error(f"Failed to get binlog position: {e}")
             raise
     
+    def resume_from_position(self, log_file: str, log_pos: int):
+        """从指定位置恢复监控"""
+        try:
+            if self.stream:
+                self.stream.close()
+            
+            # 从指定位置创建新的流
+            self.stream = BinLogStreamReader(
+                connection_settings=self.mysql_settings,
+                server_id=self.config.get('collectors.binary_log.server_id', 1),
+                log_file=log_file,
+                log_pos=log_pos,
+                only_events=[
+                    DeleteRowsEvent, UpdateRowsEvent, WriteRowsEvent, QueryEvent
+                ],
+                resume_stream=True,
+                blocking=True
+            )
+            
+            logger.info(f"Resumed binlog monitoring from {log_file}:{log_pos}")
+            
+        except Exception as e:
+            logger.error(f"Failed to resume from position: {e}")
+            raise
+    
     def _monitor_loop(self):
         """监控循环"""
         logger.info("Starting binlog monitoring loop")
@@ -206,7 +231,7 @@ class BinlogCollector:
         
         # 创建DDL变更记录
         change_record = {
-            'timestamp': datetime.now(),
+            'timestamp': datetime.fromtimestamp(event.timestamp),
             'operation_type': 'DDL',
             'database_name': event.schema,
             'table_name': self._extract_table_name(event.query),
@@ -217,7 +242,9 @@ class BinlogCollector:
             'execution_time': 0,
             'before_values': None,
             'after_values': None,
-            'source': 'binlog_ddl'
+            'source': 'binlog_ddl',
+            'binlog_file': event.packet.log_file,
+            'binlog_pos': event.packet.log_pos
         }
         
         # 调用回调函数
@@ -235,7 +262,9 @@ class BinlogCollector:
             'thread_id': event.packet.log_pos,
             'rows_affected': 1,
             'execution_time': 0,
-            'source': 'binlog_dml'
+            'source': 'binlog_dml',
+            'binlog_file': event.packet.log_file,
+            'binlog_pos': event.packet.log_pos
         }
         
         # 根据操作类型设置前后值
