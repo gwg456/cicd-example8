@@ -71,8 +71,11 @@ DEPLOY_MODE=true python flow.py
 
 ### Docker 运行
 
+#### 标准构建
 ```bash
 # 构建镜像
+make build
+# 或
 docker build -t cicd-example .
 
 # 运行容器
@@ -80,6 +83,49 @@ docker run --rm \
   -e PREFECT_API_URL=http://your-prefect-server:4200/api \
   -e DEPLOY_MODE=true \
   cicd-example
+```
+
+#### 多阶段构建（推荐）
+```bash
+# 构建优化镜像
+make build-optimized
+# 或
+docker build -f Dockerfile.multi -t cicd-example:optimized .
+
+# 运行优化容器
+docker run --rm \
+  -e PREFECT_API_URL=http://your-prefect-server:4200/api \
+  -e DEPLOY_MODE=true \
+  cicd-example:optimized
+```
+
+#### 生产环境构建
+```bash
+# 构建生产镜像
+make build-prod
+# 或
+docker build -f Dockerfile.prod -t cicd-example:prod .
+
+# 运行生产容器
+docker run --rm \
+  -e PREFECT_API_URL=http://your-prefect-server:4200/api \
+  -e DEPLOY_MODE=true \
+  cicd-example:prod
+```
+
+#### Docker Compose（推荐用于开发）
+```bash
+# 启动开发环境（包含 Prefect 服务器）
+make compose-dev
+
+# 启动生产环境
+make compose-optimized
+
+# 查看日志
+make compose-logs
+
+# 停止服务
+make compose-down
 ```
 
 ### CI/CD 自动部署
@@ -98,9 +144,16 @@ cicd-example/
 │   └── workflows/
 │       └── deploy-prefect-flow.yaml  # CI/CD 配置
 ├── flow.py                           # 主要工作流代码
-├── Dockerfile                        # Docker 镜像配置
+├── config.py                         # 配置文件
+├── Dockerfile                        # 标准 Docker 镜像配置
+├── Dockerfile.multi                  # 多阶段构建 Docker 镜像配置
+├── Dockerfile.prod                   # 生产环境 Docker 镜像配置
+├── docker-compose.yml                # Docker Compose 配置
+├── .dockerignore                     # Docker 构建忽略文件
 ├── requirements.txt                  # Python 依赖
+├── Makefile                          # 构建和部署命令
 ├── README.md                         # 项目文档
+├── DOCKER_README.md                  # Docker 详细说明
 └── .gitignore                        # Git 忽略文件
 ```
 
@@ -132,6 +185,28 @@ schedule={"interval": 86400}
 # Cron 表达式
 schedule={"cron": "0 9 * * *"}  # 每天上午9点
 ```
+
+## 🐳 Docker 优化
+
+本项目提供了多个优化版本的 Dockerfile：
+
+### 版本对比
+
+| 版本 | 用途 | 特点 | 推荐场景 |
+|------|------|------|----------|
+| `Dockerfile` | 标准版本 | 基础优化，易于理解 | 开发和测试 |
+| `Dockerfile.multi` | 多阶段构建 | 镜像更小，构建更快 | CI/CD 和测试 |
+| `Dockerfile.prod` | 生产版本 | 安全优化，权限控制 | 生产环境 |
+
+### 主要优化点
+
+1. **多阶段构建**: 分离构建和运行环境，减少镜像大小
+2. **安全优化**: 使用非 root 用户，最小化依赖
+3. **性能优化**: 合理使用缓存，优化环境变量
+4. **健康检查**: 自动监控容器状态
+5. **Docker Compose**: 简化开发和部署流程
+
+详细说明请参考 [DOCKER_README.md](DOCKER_README.md)。
 
 ## 🐛 故障排除
 

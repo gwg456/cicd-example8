@@ -45,6 +45,26 @@ clean:
 build:
 	docker build -t cicd-example .
 
+# 构建优化的多阶段 Docker 镜像
+build-optimized:
+	docker build -f Dockerfile.multi -t cicd-example:optimized .
+
+# 构建生产环境镜像
+build-prod:
+	docker build -f Dockerfile.prod -t cicd-example:prod .
+
+# 构建并推送镜像
+build-push:
+	docker build -t cicd-example .
+	docker tag cicd-example $(IMAGE_REPO):$(IMAGE_TAG)
+	docker push $(IMAGE_REPO):$(IMAGE_TAG)
+
+# 构建并推送生产镜像
+build-push-prod:
+	docker build -f Dockerfile.prod -t cicd-example:prod .
+	docker tag cicd-example:prod $(IMAGE_REPO):$(IMAGE_TAG)
+	docker push $(IMAGE_REPO):$(IMAGE_TAG)
+
 # 本地运行工作流
 run:
 	python flow.py
@@ -52,6 +72,22 @@ run:
 # 部署工作流
 deploy:
 	DEPLOY_MODE=true python flow.py
+
+# Docker Compose 命令
+compose-up:
+	docker-compose up -d
+
+compose-down:
+	docker-compose down
+
+compose-logs:
+	docker-compose logs -f
+
+compose-dev:
+	docker-compose --profile dev up -d
+
+compose-optimized:
+	docker-compose --profile optimized up -d
 
 # 运行 Docker 容器
 docker-run:
@@ -84,3 +120,11 @@ status:
 # 验证配置
 validate:
 	python -c "from config import config; print('配置验证:', config.validate_config())"
+
+# 测试 Docker 构建
+test-docker:
+	./test-docker.sh
+
+# 清理 Docker 测试镜像
+clean-docker:
+	./test-docker.sh --clean

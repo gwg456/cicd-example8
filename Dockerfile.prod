@@ -1,0 +1,99 @@
+# 生产环境 Dockerfile - 安全优化版本
+
+# 第一阶段：构建阶段
+FROM python:3.12-slim as builder
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+# 安装构建依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# 复制依赖文件
+COPY requirements.txt .
+
+# 创建虚拟环境并安装依赖
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
+
+# 第二阶段：运行阶段
+FROM python:3.12-slim as runtime
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    DEBIAN_FRONTEND=noninteractive \
+    # 安全相关环境变量
+    PYTHONHASHSEED=random \
+    # 禁用 Python 字节码缓存
+    PYTHONDONTWRITEBYTECODE=1
+
+# 安装运行时依赖
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean \
+    && apt-get autoremove -y
+
+# 从构建阶段复制虚拟环境
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# 复制应用代码
+COPY flow.py config.py ./
+
+# 创建非 root 用户和组
+RUN groupadd -r appuser && \
+    useradd -r -g appuser -s /bin/bash -m appuser && \
+    chown -R appuser:appuser /app
+
+# 设置文件权限
+RUN chmod -R 755 /app && \
+    chown -R appuser:appuser /app
+
+# 切换到非 root 用户
+USER appuser
+
+# 设置环境变量（构建时可以覆盖）
+ARG PREFECT_API_URL
+ARG IMAGE_REPO
+ARG IMAGE_TAG
+ARG WORK_POOL_NAME=my-docker-pool2
+
+# 将构建参数转换为环境变量
+ENV PREFECT_API_URL=${PREFECT_API_URL} \
+    IMAGE_REPO=${IMAGE_REPO} \
+    IMAGE_TAG=${IMAGE_TAG} \
+    WORK_POOL_NAME=${WORK_POOL_NAME} \
+    PREFECT_LOGGING_LEVEL=INFO
+
+# 健康检查
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD python -c "import requests; requests.get('${PREFECT_API_URL:-http://localhost:4200/api}/health')" || exit 1
+
+# 暴露端口（如果需要）
+EXPOSE 8000
+
+# 设置安全标签
+LABEL maintainer="your-email@example.com" \
+      version="1.0" \
+      description="Production Prefect workflow container" \
+      security.opendistroforelasticsearch.jwt_enabled="false"
+
+# 启动命令
+CMD ["python", "flow.py"]

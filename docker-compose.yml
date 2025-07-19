@@ -1,0 +1,76 @@
+version: '3.8'
+
+services:
+  # Prefect 服务器（开发环境）
+  prefect-server:
+    image: prefecthq/prefect:2-latest
+    container_name: prefect-server
+    ports:
+      - "4200:4200"
+    environment:
+      - PREFECT_API_URL=http://localhost:4200/api
+    volumes:
+      - prefect_data:/root/.prefect
+    command: prefect server start --host 0.0.0.0 --port 4200
+    profiles:
+      - dev
+
+  # 主应用服务
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        - PREFECT_API_URL=${PREFECT_API_URL:-http://localhost:4200/api}
+        - IMAGE_REPO=${IMAGE_REPO:-ghcr.io/samples28/cicd-example}
+        - IMAGE_TAG=${IMAGE_TAG:-latest}
+        - WORK_POOL_NAME=${WORK_POOL_NAME:-my-docker-pool2}
+    container_name: cicd-example-app
+    environment:
+      - PREFECT_API_URL=${PREFECT_API_URL:-http://localhost:4200/api}
+      - DEPLOY_MODE=${DEPLOY_MODE:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - prefect-server
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('${PREFECT_API_URL:-http://localhost:4200/api}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # 优化的应用服务（使用多阶段构建）
+  app-optimized:
+    build:
+      context: .
+      dockerfile: Dockerfile.multi
+      args:
+        - PREFECT_API_URL=${PREFECT_API_URL:-http://localhost:4200/api}
+        - IMAGE_REPO=${IMAGE_REPO:-ghcr.io/samples28/cicd-example}
+        - IMAGE_TAG=${IMAGE_TAG:-latest}
+        - WORK_POOL_NAME=${WORK_POOL_NAME:-my-docker-pool2}
+    container_name: cicd-example-app-optimized
+    environment:
+      - PREFECT_API_URL=${PREFECT_API_URL:-http://localhost:4200/api}
+      - DEPLOY_MODE=${DEPLOY_MODE:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      - prefect-server
+    restart: unless-stopped
+    profiles:
+      - optimized
+    healthcheck:
+      test: ["CMD", "python", "-c", "import requests; requests.get('${PREFECT_API_URL:-http://localhost:4200/api}/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  prefect_data:
+    driver: local
