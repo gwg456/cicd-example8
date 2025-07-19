@@ -41,6 +41,26 @@ jobs:
           echo "📋 当前hosts文件末尾10行:"
           sudo tail -10 /etc/hosts
 
+      - name: Create container hosts file
+        run: |
+          # 创建容器专用的hosts文件
+          echo "🔧 创建容器专用的hosts文件..."
+          
+          # 复制系统默认的hosts内容
+          echo "127.0.0.1	localhost" > container-hosts
+          echo "::1		localhost ip6-localhost ip6-loopback" >> container-hosts
+          echo "fe00::0		ip6-localnet" >> container-hosts
+          echo "ff00::0		ip6-mcastprefix" >> container-hosts
+          echo "ff02::1		ip6-allnodes" >> container-hosts
+          echo "ff02::2		ip6-allrouters" >> container-hosts
+          
+          # 添加Docker Hub的域名解析
+          echo "# Docker Hub hosts for container" >> container-hosts
+          cat docker-hosts.txt | grep -v "^#" | grep -v "^$" >> container-hosts
+          
+          echo "✅ 容器hosts文件创建完成:"
+          cat container-hosts
+
       - name: Extract Docker Hub hosts for container build
         run: |
           # 给脚本添加执行权限
@@ -55,8 +75,35 @@ jobs:
             echo "✅ 成功提取Docker Hub hosts配置"
             echo "📋 提取的配置:"
             cat docker-add-hosts.txt
+            
+            # 创建GitHub Actions环境变量格式
+            echo "DOCKER_ADD_HOSTS<<EOF" >> $GITHUB_ENV
+            cat docker-add-hosts.txt | sed 's/:/ /' >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            
+            # 创建docker run时使用的add-host参数
+            echo "DOCKER_RUN_HOSTS<<EOF" >> $GITHUB_ENV
+            cat docker-add-hosts.txt | sed 's/^/--add-host /' >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            
           else
-            echo "❌ 未能生成docker-add-hosts.txt文件"
+            echo "❌ 未能生成docker-add-hosts.txt文件，使用默认配置"
+            # 使用默认配置
+            echo "DOCKER_ADD_HOSTS<<EOF" >> $GITHUB_ENV
+            echo "registry-1.docker.io 52.4.71.198" >> $GITHUB_ENV
+            echo "auth.docker.io 54.85.56.253" >> $GITHUB_ENV
+            echo "production.cloudflare.docker.com 52.72.232.213" >> $GITHUB_ENV
+            echo "index.docker.io 52.1.38.175" >> $GITHUB_ENV
+            echo "registry.docker.io 52.4.71.198" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
+            
+            echo "DOCKER_RUN_HOSTS<<EOF" >> $GITHUB_ENV
+            echo "--add-host registry-1.docker.io:52.4.71.198" >> $GITHUB_ENV
+            echo "--add-host auth.docker.io:54.85.56.253" >> $GITHUB_ENV
+            echo "--add-host production.cloudflare.docker.com:52.72.232.213" >> $GITHUB_ENV
+            echo "--add-host index.docker.io:52.1.38.175" >> $GITHUB_ENV
+            echo "--add-host registry.docker.io:52.4.71.198" >> $GITHUB_ENV
+            echo "EOF" >> $GITHUB_ENV
           fi
 
       - name: Test Docker Hub connectivity
@@ -75,6 +122,14 @@ jobs:
           # 测试HTTP连接
           echo "🌐 测试HTTP连接:"
           curl -I --connect-timeout 10 https://registry-1.docker.io/v2/ || echo "HTTP connection failed"
+          
+          # 测试容器内访问（使用hosts文件挂载）
+          echo "🐳 测试容器内DNS解析（挂载hosts文件）:"
+          docker run --rm -v $(pwd)/container-hosts:/etc/hosts alpine:latest nslookup registry-1.docker.io || echo "Container hosts file test failed"
+          
+          # 测试容器内访问（使用add-host参数）
+          echo "🐳 测试容器内DNS解析（add-host参数）:"
+          docker run --rm ${{ env.DOCKER_RUN_HOSTS }} alpine:latest nslookup registry-1.docker.io || echo "Container add-host test failed"
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -114,27 +169,25 @@ jobs:
           allow: |
             network.host
             security.insecure
-          add-hosts: |
-            registry-1.docker.io:52.4.71.198
-            auth.docker.io:54.85.56.253
-            production.cloudflare.docker.com:52.72.232.213
-            index.docker.io:52.1.38.175
-            registry.docker.io:52.4.71.198
+          add-hosts: ${{ env.DOCKER_ADD_HOSTS }}
         timeout-minutes: 20
 
       - name: Deploy using the built image
         run: |
-          # 直接使用已构建的镜像执行部署，传递hosts配置
+          # 输出将要使用的hosts配置
+          echo "🔧 使用的Docker hosts配置方案:"
+          echo "方案1: 挂载hosts文件"
+          echo "方案2: 使用add-host参数: ${{ env.DOCKER_RUN_HOSTS }}"
+          
+          # 方案1: 挂载容器专用hosts文件（推荐）
+          echo "🚀 使用挂载hosts文件方式运行容器..."
           docker run --rm \
+            -v $(pwd)/container-hosts:/etc/hosts \
             -e PREFECT_API_URL=${{ secrets.PREFECT_API_URL }} \
             -e IMAGE_REPO=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
             -e IMAGE_TAG=${{ steps.version.outputs.VERSION }} \
             -e WORK_POOL_NAME=my-docker-pool2 \
             -e DEPLOY_MODE=true \
             -v /var/run/docker.sock:/var/run/docker.sock \
-            --add-host registry-1.docker.io:52.4.71.198 \
-            --add-host auth.docker.io:54.85.56.253 \
-            --add-host production.cloudflare.docker.com:52.72.232.213 \
-            --add-host index.docker.io:52.1.38.175 \
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.VERSION }}
         timeout-minutes: 10
