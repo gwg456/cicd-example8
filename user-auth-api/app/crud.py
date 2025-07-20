@@ -1,7 +1,9 @@
 from sqlalchemy.orm import Session
 from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta
 from . import models, schemas
 from .auth import get_password_hash, verify_password
+from .client_auth import client_auth_service
 
 
 # User CRUD operations
@@ -161,6 +163,183 @@ def remove_user_provider_link(db: Session, user_id: int, provider: str) -> bool:
         db.commit()
         return True
     return False
+
+
+# API Client CRUD operations
+def create_api_client(
+    db: Session, 
+    client: schemas.APIClientCreate, 
+    owner_id: int
+) -> models.APIClient:
+    """Create new API client"""
+    credentials = client_auth_service.generate_client_credentials()
+    client_secret_hash = get_password_hash(credentials["client_secret"])
+    
+    db_client = models.APIClient(
+        client_id=credentials["client_id"],
+        client_secret_hash=client_secret_hash,
+        name=client.name,
+        description=client.description,
+        owner_id=owner_id,
+        scopes=client.scopes,
+        is_trusted=client.is_trusted
+    )
+    
+    # Set expiration if provided
+    if client.expires_days:
+        db_client.expires_at = datetime.utcnow() + timedelta(days=client.expires_days)
+    
+    db.add(db_client)
+    db.commit()
+    db.refresh(db_client)
+    
+    # Return client with plain text secret (only time it's available)
+    db_client.client_secret = credentials["client_secret"]
+    return db_client
+
+
+def get_api_client_by_id(db: Session, client_id: str) -> Optional[models.APIClient]:
+    """Get API client by client_id"""
+    return db.query(models.APIClient).filter(
+        models.APIClient.client_id == client_id
+    ).first()
+
+
+def get_user_api_clients(db: Session, user_id: int) -> List[models.APIClient]:
+    """Get all API clients for a user"""
+    return db.query(models.APIClient).filter(
+        models.APIClient.owner_id == user_id
+    ).all()
+
+
+def update_api_client(
+    db: Session, 
+    client_id: str, 
+    client_update: schemas.APIClientUpdate
+) -> Optional[models.APIClient]:
+    """Update API client"""
+    db_client = get_api_client_by_id(db, client_id)
+    if not db_client:
+        return None
+    
+    update_data = client_update.model_dump(exclude_unset=True)
+    
+    for field, value in update_data.items():
+        setattr(db_client, field, value)
+    
+    db.commit()
+    db.refresh(db_client)
+    return db_client
+
+
+def delete_api_client(db: Session, client_id: str) -> bool:
+    """Delete API client"""
+    db_client = get_api_client_by_id(db, client_id)
+    if not db_client:
+        return False
+    
+    db.delete(db_client)
+    db.commit()
+    return True
+
+
+def authenticate_client(db: Session, client_id: str, client_secret: str) -> Optional[models.APIClient]:
+    """Authenticate API client"""
+    client = get_api_client_by_id(db, client_id)
+    if not client or not client.is_active:
+        return None
+    
+    # Check expiration
+    if client.expires_at and client.expires_at < datetime.utcnow():
+        return None
+    
+    # Verify client secret
+    if not verify_password(client_secret, client.client_secret_hash):
+        return None
+    
+    # Update last used time and request count
+    client.last_used_at = datetime.utcnow()
+    client.request_count += 1
+    db.commit()
+    
+    return client
+
+
+def create_api_key(
+    db: Session, 
+    api_key: schemas.APIKeyCreate, 
+    client_id: int
+) -> models.APIKey:
+    """Create new API key"""
+    key_value = client_auth_service.generate_api_key(f"client_{client_id}")
+    key_hash = get_password_hash(key_value)
+    
+    db_key = models.APIKey(
+        key_id=f"ak_{client_id}_{len(key_value)}",
+        key_hash=key_hash,
+        name=api_key.name,
+        client_id=client_id,
+        scopes=api_key.scopes
+    )
+    
+    # Set expiration if provided
+    if api_key.expires_days:
+        db_key.expires_at = datetime.utcnow() + timedelta(days=api_key.expires_days)
+    
+    db.add(db_key)
+    db.commit()
+    db.refresh(db_key)
+    
+    # Return key with plain text value (only time it's available)
+    db_key.key_value = key_value
+    return db_key
+
+
+def get_api_key_by_id(db: Session, key_id: str) -> Optional[models.APIKey]:
+    """Get API key by key_id"""
+    return db.query(models.APIKey).filter(
+        models.APIKey.key_id == key_id
+    ).first()
+
+
+def get_client_api_keys(db: Session, client_id: int) -> List[models.APIKey]:
+    """Get all API keys for a client"""
+    return db.query(models.APIKey).filter(
+        models.APIKey.client_id == client_id
+    ).all()
+
+
+def authenticate_api_key(db: Session, key_id: str, key_value: str) -> Optional[models.APIKey]:
+    """Authenticate API key"""
+    api_key = get_api_key_by_id(db, key_id)
+    if not api_key or not api_key.is_active:
+        return None
+    
+    # Check expiration
+    if api_key.expires_at and api_key.expires_at < datetime.utcnow():
+        return None
+    
+    # Verify key value
+    if not verify_password(key_value, api_key.key_hash):
+        return None
+    
+    # Update last used time and request count
+    api_key.last_used_at = datetime.utcnow()
+    api_key.request_count += 1
+    db.commit()
+    
+    return api_key
+
+
+def revoke_api_key(db: Session, key_id: str) -> bool:
+    """Revoke API key"""
+    api_key = get_api_key_by_id(db, key_id)
+    if not api_key:
+        return False
+    
+    api_key.is_active = False
+    db.commit()
+    return True
 
 
 # Role CRUD operations

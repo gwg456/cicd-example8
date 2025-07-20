@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Table, Text, JSON
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Table, Text, JSON, ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
@@ -32,6 +32,9 @@ class User(Base):
     
     # One-to-many relationship with OIDC provider links
     oidc_links = relationship("UserOIDCLink", back_populates="user", cascade="all, delete-orphan")
+    
+    # One-to-many relationship with API clients
+    api_clients = relationship("APIClient", back_populates="owner", cascade="all, delete-orphan")
 
 
 class UserOIDCLink(Base):
@@ -53,6 +56,77 @@ class UserOIDCLink(Base):
     __table_args__ = (
         {'extend_existing': True}
     )
+
+
+class APIClient(Base):
+    """API客户端表 - 用于外部客户端认证"""
+    __tablename__ = "api_clients"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    client_id = Column(String, unique=True, index=True, nullable=False)
+    client_secret_hash = Column(String, nullable=False)  # 加密存储的客户端密钥
+    name = Column(String, nullable=False)  # 客户端名称
+    description = Column(Text, nullable=True)  # 客户端描述
+    owner_id = Column(Integer, ForeignKey('users.id'), nullable=False)
+    
+    # 权限和配置
+    scopes = Column(ARRAY(String), nullable=True)  # 权限范围
+    is_active = Column(Boolean, default=True)
+    is_trusted = Column(Boolean, default=False)  # 是否为受信任客户端
+    
+    # 使用统计
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    request_count = Column(Integer, default=0)
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # 客户端过期时间
+    
+    # 关系
+    owner = relationship("User", back_populates="api_clients")
+    api_keys = relationship("APIKey", back_populates="client", cascade="all, delete-orphan")
+
+
+class APIKey(Base):
+    """API密钥表"""
+    __tablename__ = "api_keys"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    key_id = Column(String, unique=True, index=True, nullable=False)  # 公开的密钥ID
+    key_hash = Column(String, nullable=False)  # 加密存储的密钥
+    name = Column(String, nullable=False)  # 密钥名称
+    client_id = Column(Integer, ForeignKey('api_clients.id'), nullable=False)
+    
+    # 权限和配置
+    scopes = Column(ARRAY(String), nullable=True)  # 权限范围
+    is_active = Column(Boolean, default=True)
+    
+    # 使用统计
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    request_count = Column(Integer, default=0)
+    
+    # 时间戳
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # 密钥过期时间
+    
+    # 关系
+    client = relationship("APIClient", back_populates="api_keys")
+
+
+class ClientAccessToken(Base):
+    """客户端访问令牌表 - 用于跟踪活跃的客户端令牌"""
+    __tablename__ = "client_access_tokens"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    token_id = Column(String, unique=True, index=True, nullable=False)
+    client_id = Column(String, ForeignKey('api_clients.client_id'), nullable=False)
+    scopes = Column(ARRAY(String), nullable=True)
+    is_active = Column(Boolean, default=True)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class Role(Base):

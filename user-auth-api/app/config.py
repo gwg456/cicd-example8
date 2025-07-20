@@ -14,6 +14,11 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
+    # Client Authentication settings
+    client_token_expire_minutes: int = 60  # 客户端令牌过期时间
+    api_key_expire_days: int = 365  # API密钥过期天数
+    max_clients_per_user: int = 10  # 每个用户最大客户端数量
+    
     # Security settings
     bcrypt_rounds: int = 12
     
@@ -22,7 +27,12 @@ class Settings(BaseSettings):
     debug: bool = True
     base_url: str = "http://localhost:8000"
     
-    # OIDC Provider Settings
+    # Rate limiting settings
+    rate_limit_enabled: bool = True
+    rate_limit_requests_per_minute: int = 100
+    rate_limit_burst: int = 20
+    
+    # OIDC Provider Settings (保留现有OIDC配置)
     # Google OAuth 2.0 / OIDC
     google_client_id: Optional[str] = None
     google_client_secret: Optional[str] = None

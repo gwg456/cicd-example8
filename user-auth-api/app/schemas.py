@@ -54,7 +54,141 @@ class UserWithRoles(User):
     roles: List["Role"] = []
 
 
-# OIDC Schemas
+# API Client schemas
+class APIClientBase(BaseModel):
+    """Base API client schema"""
+    name: str
+    description: Optional[str] = None
+    scopes: Optional[List[str]] = ["read"]
+    is_trusted: bool = False
+
+
+class APIClientCreate(APIClientBase):
+    """API client creation schema"""
+    expires_days: Optional[int] = None
+    
+    @validator('scopes')
+    def validate_scopes(cls, v):
+        valid_scopes = ["read", "write", "admin", "delete"]
+        if v:
+            for scope in v:
+                if scope not in valid_scopes:
+                    raise ValueError(f"Invalid scope: {scope}. Valid scopes: {valid_scopes}")
+        return v
+
+
+class APIClientUpdate(BaseModel):
+    """API client update schema"""
+    name: Optional[str] = None
+    description: Optional[str] = None
+    scopes: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+    is_trusted: Optional[bool] = None
+
+
+class APIClientInDB(APIClientBase):
+    """API client schema for database operations"""
+    id: int
+    client_id: str
+    owner_id: int
+    is_active: bool
+    request_count: int
+    last_used_at: Optional[datetime]
+    created_at: datetime
+    updated_at: Optional[datetime]
+    expires_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class APIClient(APIClientInDB):
+    """API client response schema"""
+    pass
+
+
+class APIClientWithSecret(APIClient):
+    """API client with secret (only returned on creation)"""
+    client_secret: str
+
+
+class APIClientWithKeys(APIClient):
+    """API client with API keys"""
+    api_keys: List["APIKey"] = []
+
+
+# API Key schemas
+class APIKeyBase(BaseModel):
+    """Base API key schema"""
+    name: str
+    scopes: Optional[List[str]] = ["read"]
+
+
+class APIKeyCreate(APIKeyBase):
+    """API key creation schema"""
+    expires_days: Optional[int] = 365
+    
+    @validator('scopes')
+    def validate_scopes(cls, v):
+        valid_scopes = ["read", "write", "admin", "delete"]
+        if v:
+            for scope in v:
+                if scope not in valid_scopes:
+                    raise ValueError(f"Invalid scope: {scope}. Valid scopes: {valid_scopes}")
+        return v
+
+
+class APIKeyInDB(APIKeyBase):
+    """API key schema for database operations"""
+    id: int
+    key_id: str
+    client_id: int
+    is_active: bool
+    request_count: int
+    last_used_at: Optional[datetime]
+    created_at: datetime
+    updated_at: Optional[datetime]
+    expires_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class APIKey(APIKeyInDB):
+    """API key response schema"""
+    pass
+
+
+class APIKeyWithValue(APIKey):
+    """API key with value (only returned on creation)"""
+    key_value: str
+
+
+# Client Authentication schemas
+class ClientCredentialsRequest(BaseModel):
+    """Client credentials grant request"""
+    grant_type: str = "client_credentials"
+    client_id: str
+    client_secret: str
+    scope: Optional[str] = "read"
+
+
+class ClientAccessTokenResponse(BaseModel):
+    """Client access token response"""
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+    scope: str
+
+
+class APIKeyAuthRequest(BaseModel):
+    """API key authentication request"""
+    api_key: str
+    timestamp: str
+    signature: str
+
+
+# OIDC Schemas (保留现有OIDC相关schemas)
 class OIDCProvider(BaseModel):
     """OIDC Provider information"""
     name: str
@@ -176,8 +310,27 @@ class UserSearch(BaseModel):
     limit: int = 100
 
 
+# API Documentation schemas
+class APIInfo(BaseModel):
+    """API information"""
+    name: str
+    version: str
+    description: str
+    authentication_methods: List[str]
+
+
+class ErrorResponse(BaseModel):
+    """Error response schema"""
+    error: str
+    message: str
+    details: Optional[Dict[str, Any]] = None
+
+
 # Update forward references
 User.model_rebuild()
 UserWithRoles.model_rebuild()
 Role.model_rebuild()
 RoleWithUsers.model_rebuild()
+APIClient.model_rebuild()
+APIClientWithKeys.model_rebuild()
+APIKey.model_rebuild()
