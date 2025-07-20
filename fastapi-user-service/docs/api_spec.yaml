@@ -1,0 +1,769 @@
+openapi: 3.1.0
+info:
+  title: FastAPI用户服务
+  description: |
+    基于FastAPI构建的现代化用户管理服务，提供用户注册、登录、JWT认证等完整功能。
+    
+    ## 🎯 核心功能
+    
+    - **用户注册**: 安全的用户注册接口
+    - **用户登录**: JWT Token认证登录
+    - **密码加密**: bcrypt安全密码哈希
+    - **JWT认证**: 完整的Token认证体系
+    - **数据验证**: Pydantic模型验证
+    - **API文档**: 自动生成OpenAPI文档
+    
+    ## 🔐 安全特性
+    
+    - 密码强度验证
+    - JWT Token认证
+    - 账户锁定机制
+    - 登录日志记录
+    - 敏感信息保护
+    
+    ## 📖 使用指南
+    
+    1. **注册账户**: 使用 `POST /user/register` 创建新用户
+    2. **用户登录**: 使用 `POST /user/login` 获取JWT Token
+    3. **认证请求**: 在请求头中添加 `Authorization: Bearer <token>`
+    4. **管理用户**: 管理员可以使用相关接口管理用户账户
+    
+  version: 1.0.0
+  contact:
+    name: API支持
+    email: support@example.com
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: 开发环境
+  - url: https://api.example.com
+    description: 生产环境
+
+paths:
+  # 系统信息接口
+  /:
+    get:
+      summary: 服务信息
+      description: 获取API服务基本信息
+      tags:
+        - 系统
+      responses:
+        '200':
+          description: 服务信息
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: "欢迎使用FastAPI用户服务"
+                  app_name:
+                    type: string
+                    example: "FastAPI用户服务"
+                  version:
+                    type: string
+                    example: "1.0.0"
+
+  /health:
+    get:
+      summary: 健康检查
+      description: 检查服务健康状态
+      tags:
+        - 系统
+      responses:
+        '200':
+          description: 服务健康
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "healthy"
+                  timestamp:
+                    type: number
+                  database:
+                    type: string
+                    example: "connected"
+        '503':
+          description: 服务不健康
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "unhealthy"
+                  error:
+                    type: string
+
+  # 用户注册接口
+  /user/register:
+    post:
+      summary: 用户注册
+      description: 创建新用户账户
+      tags:
+        - 用户管理
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreate'
+            examples:
+              basic_user:
+                summary: 基础用户注册
+                value:
+                  username: "testuser"
+                  email: "test@example.com"
+                  password: "SecurePass123"
+                  password_confirm: "SecurePass123"
+                  full_name: "Test User"
+      responses:
+        '201':
+          description: 注册成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiResponse'
+        '400':
+          description: 注册失败 - 数据验证错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '403':
+          description: 注册功能已禁用
+        '409':
+          description: 用户名或邮箱已存在
+
+  # 用户登录接口
+  /user/login:
+    post:
+      summary: 用户登录
+      description: 用户登录获取JWT Token
+      tags:
+        - 认证授权
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                username:
+                  type: string
+                  description: 用户名或邮箱
+                password:
+                  type: string
+                  description: 密码
+              required:
+                - username
+                - password
+      responses:
+        '200':
+          description: 登录成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '401':
+          description: 登录失败 - 用户名或密码错误
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '423':
+          description: 账户被锁定
+
+  # 用户信息接口
+  /user/profile:
+    get:
+      summary: 获取用户信息
+      description: 获取当前登录用户的详细信息
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+    
+    put:
+      summary: 更新用户信息
+      description: 更新当前登录用户的信息
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdate'
+      responses:
+        '200':
+          description: 更新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiResponse'
+        '400':
+          description: 数据验证错误
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # 修改密码接口
+  /user/change-password:
+    post:
+      summary: 修改密码
+      description: 修改当前登录用户的密码
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserPasswordChange'
+      responses:
+        '200':
+          description: 密码修改成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                    example: "密码修改成功"
+        '400':
+          description: 当前密码错误或新密码不符合要求
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  # 用户列表接口（管理员）
+  /user/list:
+    get:
+      summary: 获取用户列表
+      description: 获取用户列表（管理员功能）
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: keyword
+          in: query
+          description: 搜索关键词
+          schema:
+            type: string
+        - name: is_active
+          in: query
+          description: 是否激活
+          schema:
+            type: boolean
+        - name: page
+          in: query
+          description: 页码
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: size
+          in: query
+          description: 每页大小
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserListResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # 获取指定用户信息
+  /user/{user_id}:
+    get:
+      summary: 获取指定用户信息
+      description: 根据用户ID获取用户信息
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: 用户不存在
+    
+    delete:
+      summary: 删除用户
+      description: 删除指定用户（管理员功能）
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 删除成功
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: 用户不存在
+
+  # 激活用户
+  /user/{user_id}/activate:
+    post:
+      summary: 激活用户
+      description: 激活指定用户账户（管理员功能）
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 激活成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: 用户不存在
+
+  # 禁用用户
+  /user/{user_id}/deactivate:
+    post:
+      summary: 禁用用户
+      description: 禁用指定用户账户（管理员功能）
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: user_id
+          in: path
+          required: true
+          description: 用户ID
+          schema:
+            type: integer
+      responses:
+        '200':
+          description: 禁用成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UserApiResponse'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+        '404':
+          description: 用户不存在
+
+  # 用户统计
+  /user/stats/overview:
+    get:
+      summary: 用户统计概览
+      description: 获取用户统计信息（管理员功能）
+      tags:
+        - 用户管理
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: 获取成功
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  data:
+                    $ref: '#/components/schemas/UserStats'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          $ref: '#/components/responses/ForbiddenError'
+
+  # 刷新Token
+  /auth/refresh:
+    post:
+      summary: 刷新Token
+      description: 使用刷新Token获取新的访问Token
+      tags:
+        - 认证授权
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          description: 刷新成功
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RefreshTokenResponse'
+        '401':
+          description: 刷新Token无效或已过期
+
+components:
+  schemas:
+    # 用户相关模型
+    UserBase:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 3
+          maxLength: 20
+          pattern: "^[a-zA-Z0-9_-]+$"
+          description: 用户名
+        email:
+          type: string
+          format: email
+          maxLength: 254
+          description: 邮箱地址
+        full_name:
+          type: string
+          maxLength: 100
+          description: 全名
+        bio:
+          type: string
+          maxLength: 500
+          description: 个人简介
+      required:
+        - username
+        - email
+
+    UserCreate:
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          properties:
+            password:
+              type: string
+              minLength: 8
+              maxLength: 50
+              description: 密码
+            password_confirm:
+              type: string
+              minLength: 8
+              maxLength: 50
+              description: 确认密码
+          required:
+            - password
+            - password_confirm
+
+    UserUpdate:
+      type: object
+      properties:
+        full_name:
+          type: string
+          maxLength: 100
+          description: 全名
+        bio:
+          type: string
+          maxLength: 500
+          description: 个人简介
+        avatar_url:
+          type: string
+          maxLength: 500
+          description: 头像URL
+
+    UserPasswordChange:
+      type: object
+      properties:
+        current_password:
+          type: string
+          description: 当前密码
+        new_password:
+          type: string
+          minLength: 8
+          maxLength: 50
+          description: 新密码
+        new_password_confirm:
+          type: string
+          minLength: 8
+          maxLength: 50
+          description: 确认新密码
+      required:
+        - current_password
+        - new_password
+        - new_password_confirm
+
+    UserResponse:
+      allOf:
+        - $ref: '#/components/schemas/UserBase'
+        - type: object
+          properties:
+            id:
+              type: integer
+              description: 用户ID
+            uuid:
+              type: string
+              description: 用户UUID
+            is_active:
+              type: boolean
+              description: 是否激活
+            is_verified:
+              type: boolean
+              description: 是否已验证邮箱
+            is_superuser:
+              type: boolean
+              description: 是否为超级用户
+            last_login_at:
+              type: string
+              format: date-time
+              description: 最后登录时间
+            login_count:
+              type: integer
+              description: 登录次数
+            created_at:
+              type: string
+              format: date-time
+              description: 创建时间
+            updated_at:
+              type: string
+              format: date-time
+              description: 更新时间
+
+    UserListResponse:
+      type: object
+      properties:
+        users:
+          type: array
+          items:
+            $ref: '#/components/schemas/UserResponse'
+        total:
+          type: integer
+          description: 总数
+        page:
+          type: integer
+          description: 当前页
+        size:
+          type: integer
+          description: 每页大小
+        pages:
+          type: integer
+          description: 总页数
+
+    UserStats:
+      type: object
+      properties:
+        total_users:
+          type: integer
+          description: 总用户数
+        active_users:
+          type: integer
+          description: 活跃用户数
+        verified_users:
+          type: integer
+          description: 已验证用户数
+        superusers:
+          type: integer
+          description: 超级用户数
+        new_users_today:
+          type: integer
+          description: 今日新用户
+        new_users_this_week:
+          type: integer
+          description: 本周新用户
+        new_users_this_month:
+          type: integer
+          description: 本月新用户
+
+    # 认证相关模型
+    Token:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: 访问Token
+        token_type:
+          type: string
+          default: "bearer"
+          description: Token类型
+        expires_in:
+          type: integer
+          description: 过期时间（秒）
+        refresh_token:
+          type: string
+          description: 刷新Token
+
+    LoginResponse:
+      allOf:
+        - $ref: '#/components/schemas/Token'
+        - type: object
+          properties:
+            user:
+              $ref: '#/components/schemas/UserResponse'
+
+    RefreshTokenRequest:
+      type: object
+      properties:
+        refresh_token:
+          type: string
+          description: 刷新Token
+      required:
+        - refresh_token
+
+    RefreshTokenResponse:
+      type: object
+      properties:
+        access_token:
+          type: string
+          description: 新的访问Token
+        token_type:
+          type: string
+          default: "bearer"
+          description: Token类型
+        expires_in:
+          type: integer
+          description: 过期时间（秒）
+
+    # API响应模型
+    UserApiResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          description: 操作是否成功
+        message:
+          type: string
+          description: 响应消息
+        data:
+          $ref: '#/components/schemas/UserResponse'
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: boolean
+          example: true
+        message:
+          type: string
+          description: 错误消息
+        status_code:
+          type: integer
+          description: HTTP状态码
+        details:
+          type: array
+          items:
+            type: object
+          description: 详细错误信息
+        path:
+          type: string
+          description: 请求路径
+
+  responses:
+    UnauthorizedError:
+      description: 认证失败
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: true
+            message: "认证失败，请登录"
+            status_code: 401
+
+    ForbiddenError:
+      description: 权限不足
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error: true
+            message: "权限不足"
+            status_code: 403
+
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        使用JWT Token进行认证。
+        
+        在请求头中添加: `Authorization: Bearer <token>`
+        
+        Token可以通过登录接口获取。
+
+tags:
+  - name: 系统
+    description: 系统信息和健康检查
+  - name: 用户管理
+    description: 用户注册、信息管理等操作
+  - name: 认证授权
+    description: 用户登录、Token管理等认证相关操作
+
+externalDocs:
+  description: 项目文档
+  url: https://github.com/example/fastapi-user-service
