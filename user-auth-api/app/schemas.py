@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, validator
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 
@@ -36,16 +36,67 @@ class UserInDB(UserBase):
     """User schema for database operations"""
     id: int
     is_superuser: bool
+    is_oidc_user: bool
     created_at: datetime
     updated_at: Optional[datetime]
-    
+
     class Config:
         from_attributes = True
 
 
 class User(UserInDB):
-    """Public user schema"""
+    """User response schema"""
+    pass
+
+
+class UserWithRoles(User):
+    """User with roles schema"""
     roles: List["Role"] = []
+
+
+# OIDC Schemas
+class OIDCProvider(BaseModel):
+    """OIDC Provider information"""
+    name: str
+    display_name: str
+    login_url: str
+
+
+class OIDCProvidersResponse(BaseModel):
+    """OIDC Providers list response"""
+    providers: List[OIDCProvider]
+    count: int
+
+
+class UserOIDCLink(BaseModel):
+    """User OIDC Provider Link"""
+    id: int
+    provider: str
+    provider_user_id: str
+    provider_data: Optional[Dict[str, Any]] = None
+    created_at: datetime
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+class UserWithOIDCLinks(User):
+    """User with OIDC provider links"""
+    oidc_links: List[UserOIDCLink] = []
+
+
+class OIDCAuthResponse(BaseModel):
+    """OIDC Authentication response"""
+    access_token: str
+    token_type: str
+    user: User
+
+
+class OIDCLogoutResponse(BaseModel):
+    """OIDC Logout response"""
+    logout_url: Optional[str] = None
+    message: Optional[str] = None
 
 
 # Role schemas
@@ -66,36 +117,23 @@ class RoleUpdate(BaseModel):
     description: Optional[str] = None
 
 
-class Role(RoleBase):
-    """Role schema"""
+class RoleInDB(RoleBase):
+    """Role schema for database operations"""
     id: int
     created_at: datetime
-    
+
     class Config:
         from_attributes = True
 
 
-# Permission schemas
-class PermissionBase(BaseModel):
-    """Base permission schema"""
-    name: str
-    description: Optional[str] = None
-    resource: str
-    action: str
-
-
-class PermissionCreate(PermissionBase):
-    """Permission creation schema"""
+class Role(RoleInDB):
+    """Role response schema"""
     pass
 
 
-class Permission(PermissionBase):
-    """Permission schema"""
-    id: int
-    created_at: datetime
-    
-    class Config:
-        from_attributes = True
+class RoleWithUsers(Role):
+    """Role with users schema"""
+    users: List[User] = []
 
 
 # Authentication schemas
@@ -116,5 +154,30 @@ class UserLogin(BaseModel):
     password: str
 
 
+class PasswordChange(BaseModel):
+    """Password change schema"""
+    current_password: str
+    new_password: str
+    
+    @validator('new_password')
+    def validate_new_password(cls, v):
+        if len(v) < 8:
+            raise ValueError('New password must be at least 8 characters long')
+        return v
+
+
+class UserSearch(BaseModel):
+    """User search parameters"""
+    username: Optional[str] = None
+    email: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_oidc_user: Optional[bool] = None
+    skip: int = 0
+    limit: int = 100
+
+
 # Update forward references
 User.model_rebuild()
+UserWithRoles.model_rebuild()
+Role.model_rebuild()
+RoleWithUsers.model_rebuild()
