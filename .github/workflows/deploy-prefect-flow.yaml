@@ -166,9 +166,7 @@ jobs:
           load: true
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-          allow: |
-            network.host
-            security.insecure
+          allow: network.host,security.insecure
           add-hosts: ${{ env.DOCKER_ADD_HOSTS }}
         timeout-minutes: 20
 
@@ -187,9 +185,7 @@ jobs:
           load: true
           build-args: |
             BUILDKIT_INLINE_CACHE=1
-          allow: |
-            network.host
-            security.insecure
+          allow: network.host,security.insecure
         timeout-minutes: 20
 
       - name: Deploy using the built image
