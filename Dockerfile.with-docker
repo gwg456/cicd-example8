@@ -1,0 +1,43 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+RUN sed -i 's/deb.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's/security.debian.org/mirrors.tuna.tsinghua.edu.cn/g' /etc/apt/sources.list.d/debian.sources
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    && mkdir -p /etc/apt/keyrings \
+    && curl -fsSL https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://mirrors.tuna.tsinghua.edu.cn/docker-ce/linux/debian $(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY pip.conf /etc/pip.conf
+
+COPY requirements.txt .
+RUN pip install --upgrade pip --no-cache-dir \
+    && pip install --no-cache-dir -r requirements.txt
+
+COPY config.py flow.py ./
+
+ARG PREFECT_API_URL
+ARG IMAGE_REPO
+ARG IMAGE_TAG
+ARG WORK_POOL_NAME=my-docker-pool2
+
+ENV PREFECT_API_URL=${PREFECT_API_URL} \
+    IMAGE_REPO=${IMAGE_REPO} \
+    IMAGE_TAG=${IMAGE_TAG} \
+    WORK_POOL_NAME=${WORK_POOL_NAME} \
+    PYTHONUNBUFFERED=1 \
+    PREFECT_LOGGING_LEVEL=INFO
+
+RUN useradd -m -u 1000 prefect && chown -R prefect:prefect /app
+USER prefect
+
+CMD ["python", "flow.py"]
