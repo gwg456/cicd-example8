@@ -1,4 +1,5 @@
 prefect==3.4.8
 prefect-docker==0.6.6
 httpx>=0.24.0
+python-dotenv>=1.0.0
 

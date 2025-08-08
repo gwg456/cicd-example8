@@ -23,7 +23,7 @@ COPY requirements.txt .
 RUN pip install --upgrade pip --no-cache-dir \
     && pip install --no-cache-dir -r requirements.txt
 
-COPY config.py flow.py ./
+COPY . .
 
 ARG PREFECT_API_URL
 ARG IMAGE_REPO
@@ -35,7 +35,8 @@ ENV PREFECT_API_URL=${PREFECT_API_URL} \
     IMAGE_TAG=${IMAGE_TAG} \
     WORK_POOL_NAME=${WORK_POOL_NAME} \
     PYTHONUNBUFFERED=1 \
-    PREFECT_LOGGING_LEVEL=INFO
+    PREFECT_LOGGING_LEVEL=INFO \
+    PYTHONPATH=/app
 
 RUN useradd -m -u 1000 prefect && chown -R prefect:prefect /app
 USER prefect
