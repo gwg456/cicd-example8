@@ -24,7 +24,7 @@
 
 ```bash
 git clone <repository-url>
-cd cicd-example
+cd <your-project-dir>
 ```
 
 ### 2. 安装依赖
@@ -35,16 +35,16 @@ pip install -r requirements.txt
 
 ### 3. 配置环境变量
 
-创建 `.env` 文件并配置以下环境变量：
+复制 `.env.example` 为 `.env` 并按需修改：
 
 ```bash
 # Prefect 配置
-PREFECT_API_URL=http://172.31.0.55:4200/api
+PREFECT_API_URL=http://localhost:4200/api
 WORK_POOL_NAME=my-docker-pool2
 
 # Docker 镜像配置
 IMAGE_REPO=ghcr.io/samples28/cicd-example
-IMAGE_TAG=v202501010000
+# IMAGE_TAG=v202501010000  # 可选
 
 # 部署模式
 DEPLOY_MODE=false
@@ -55,7 +55,8 @@ DEPLOY_MODE=false
 在 GitHub 仓库设置中配置以下 secrets：
 
 - `PREFECT_API_URL`: Prefect 服务器 API URL
-- `citoken`: GitHub Container Registry 访问令牌
+
+说明：推送 GHCR 使用 `GITHUB_TOKEN`，默认已由 GitHub Actions 提供。
 
 ## 🚀 使用方法
 
@@ -77,23 +78,9 @@ DEPLOY_MODE=true python flow.py
 
 **注意**: 如果在中国大陆地区构建遇到网络问题，请使用以下解决方案：
 
-### 🚀 快速解决方案
+### 国内网络加速
 
-1. **自动配置hosts**（推荐）:
-   ```bash
-   # 运行自动配置脚本
-   sudo chmod +x scripts/update-docker-hosts.sh
-   sudo ./scripts/update-docker-hosts.sh
-   ```
-
-2. **手动配置hosts**:
-   ```bash
-   # 添加Docker Hub IP映射
-   sudo cat docker-hosts.txt >> /etc/hosts
-   sudo systemctl restart docker
-   ```
-
-详细配置说明请参考 `docker-mirror-setup.md`
+已在镜像构建中使用清华镜像源（apt 与 pip），通常无需额外 hosts 配置。
 
 ```bash
 # 构建镜像（简化版，推荐）
@@ -120,23 +107,23 @@ docker run --rm \
 ## 📁 项目结构
 
 ```
-cicd-example/
+.
 ├── .github/
 │   └── workflows/
 │       └── deploy-prefect-flow.yaml  # CI/CD 配置
-├── flow.py                           # 主要工作流代码
-├── config.py                         # 配置管理文件
-├── Dockerfile                        # Docker 镜像配置（简化版）
-├── Dockerfile.with-docker            # Docker 镜像配置（包含Docker CLI）
-├── docker-hosts.txt                  # Docker Hub域名IP映射文件
-├── docker-mirror-setup.md            # Docker镜像加速器配置指南
-├── scripts/
-│   └── update-docker-hosts.sh        # 自动更新Docker Hub IP脚本
-├── pip.conf                          # pip清华源配置
+├── flow.py                           # 入口：运行/部署
+├── config.py                         # 配置管理
+├── Dockerfile                        # 简化版镜像
+├── Dockerfile.with-docker            # 包含 docker-cli 的镜像
+├── pip.conf                          # pip 清华源配置
 ├── requirements.txt                  # Python 依赖
 ├── Makefile                          # 构建命令
 ├── README.md                         # 项目文档
-└── .gitignore                        # Git 忽略文件
+├── .env.example                      # 环境变量示例
+└── src/
+    ├── flows.py                      # Prefect 流定义
+    ├── deployment.py                 # 部署逻辑
+    └── __init__.py
 ```
 
 ## 🔧 自定义配置

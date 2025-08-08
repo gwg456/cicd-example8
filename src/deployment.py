@@ -103,7 +103,6 @@ class DeploymentManager:
             
             # 添加超时控制
             import signal
-            import asyncio
             
             def timeout_handler(signum, frame):
                 raise TimeoutError("部署操作超时")

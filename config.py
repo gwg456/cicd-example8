@@ -7,6 +7,10 @@
 import os
 from dataclasses import dataclass
 from typing import Optional
+from dotenv import load_dotenv
+
+# 加载 .env 文件（如果存在）
+load_dotenv()
 
 
 @dataclass
@@ -19,7 +23,7 @@ class Config:
     """
     
     # Prefect配置
-    prefect_api_url: str = os.getenv("PREFECT_API_URL", "http://172.31.0.55:4200/api")
+    prefect_api_url: str = os.getenv("PREFECT_API_URL", "http://localhost:4200/api")
     work_pool_name: str = os.getenv("WORK_POOL_NAME", "my-docker-pool2")
     
     # Docker配置
@@ -34,21 +38,9 @@ class Config:
     # 调度配置
     schedule_interval: int = int(os.getenv("SCHEDULE_INTERVAL", "3600"))  # 默认1小时
     
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
+    # 超时配置（统一）
+    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", os.getenv("API_TIMEOUT", "300")))  # API请求超时时间（秒）
     deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署超时时间
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间
     
     @property
     def full_image_name(self) -> str:

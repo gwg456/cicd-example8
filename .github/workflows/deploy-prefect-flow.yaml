@@ -123,7 +123,6 @@ jobs:
             -e LOG_LEVEL=INFO \
             -e PREFECT_API_TIMEOUT=30 \
             -e DEPLOYMENT_TIMEOUT=300 \
-            -e DEPLOYMENT_TIMEOUT=300 \
             ${{ env.REGISTRY }}/${{ steps.version.outputs.IMAGE_NAME_LOWER }}:${{ steps.version.outputs.VERSION }} || {
               echo "❌ 部署失败，调试容器已省略（debug-container.py 已删除）"
             }
