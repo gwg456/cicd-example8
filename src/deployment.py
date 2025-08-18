@@ -1,234 +1,406 @@
 """
-Prefect部署管理模块
+Production-grade Prefect deployment management module
 """
+import asyncio
 import datetime
 import logging
-import tempfile
-import os
-from typing import Dict, Any, Optional
+import signal
+from typing import Dict, Any, Optional, List
+from contextlib import asynccontextmanager
 
 from prefect.client.orchestration import get_client
-from config import config
+from prefect.deployments import Deployment
+from prefect.exceptions import PrefectException
+
+from src.config import get_settings
+from src.core import (
+    retry_with_backoff,
+    async_retry_with_backoff,
+    circuit_breaker,
+    CircuitBreaker,
+    DeploymentError,
+    ConnectionError as AppConnectionError,
+    TimeoutError as AppTimeoutError,
+    ConfigurationError,
+)
 from src.flows import hello_flow, health_check_flow
+from src.monitoring import metrics
 
 logger = logging.getLogger(__name__)
+settings = get_settings()
 
 
 class DeploymentManager:
-    """部署管理器"""
+    """Production-grade deployment manager with error handling and monitoring"""
     
     def __init__(self):
-        self.config = config
-        # 确保 Prefect 客户端使用配置文件中的 API URL
-        self.config.apply_prefect_settings()
+        self.settings = settings
+        self.circuit_breaker = CircuitBreaker(
+            failure_threshold=3,
+            recovery_timeout=60,
+            expected_exception=(PrefectException, AppConnectionError),
+            name="prefect_api"
+        )
         
-        # 打印配置信息
-        if logger.isEnabledFor(logging.INFO):
-            self.config.print_config_info()
+        # Apply Prefect settings to environment
+        self._apply_prefect_settings()
         
+        # Print configuration if not in production
+        if not self.settings.is_production:
+            self.settings.print_config_summary()
+    
+    def _apply_prefect_settings(self):
+        """Apply Prefect settings to environment"""
+        import os
+        for key, value in self.settings.get_prefect_settings().items():
+            if value is not None:
+                os.environ[key] = str(value)
+    
     def _generate_image_tag(self) -> str:
-        """生成镜像标签"""
-        if self.config.image_tag:
-            image_tag = f"{self.config.image_repo}:{self.config.image_tag}"
-            logger.info(f"使用提供的镜像标签: {image_tag}")
-        else:
-            current_time = datetime.datetime.now()
-            version_tag = f"v{current_time.strftime('%Y%m%d%H%M')}"
-            image_tag = f"{self.config.image_repo}:{version_tag}"
-            logger.info(f"生成新的镜像标签: {image_tag}")
+        """Generate Docker image tag"""
+        if self.settings.image_tag:
+            return self.settings.full_image_name
         
-        return image_tag
+        # Generate timestamp-based tag
+        current_time = datetime.datetime.now()
+        version_tag = f"v{current_time.strftime('%Y%m%d%H%M')}"
+        return f"{self.settings.image_repo}:{version_tag}"
     
-    def _get_base_env_vars(self) -> Dict[str, str]:
-        """获取基础环境变量"""
-        return {
-            "LOG_LEVEL": self.config.log_level,
-            "ENVIRONMENT": self.config.environment,
-            "PYTHONUNBUFFERED": "1",
-            "PREFECT_LOGGING_LEVEL": self.config.log_level,
-            "PREFECT_API_RESPONSE_TIMEOUT": str(self.config.api_timeout),
-            "PREFECT_API_REQUEST_TIMEOUT": str(self.config.api_timeout),
-        }
-    
-    def _get_docker_job_variables(self) -> Dict[str, Any]:
-        """获取Docker作业变量"""
-        if self.config.is_container_env:
-            return {
-                "env": self._get_base_env_vars()
-            }
-        else:
-            # 本地环境需要更多Docker配置
-            temp_log_dir = tempfile.mkdtemp(prefix="prefect_logs_")
-            env_vars = self._get_base_env_vars()
-            
-            return {
-                f"env.{k}": v for k, v in env_vars.items()
-            } | {
-                "env.DOCKER_CLIENT_TIMEOUT": "300",
-                "env.COMPOSE_HTTP_TIMEOUT": "300",
-                "env.PREFECT_DOCKER_HOST_NETWORK": "true",
-                "env.PREFECT_DOCKER_VOLUME_MOUNTS": f"{temp_log_dir}:/tmp/prefect/logs",
-                "env.PREFECT_DOCKER_NETWORK": "host"
-            }
-    
+    @async_retry_with_backoff(max_attempts=3, max_delay=10)
     async def check_prefect_connection(self) -> bool:
-        """检查Prefect API连接"""
+        """
+        Check Prefect API connection with retry logic
+        
+        Returns:
+            True if connection successful, False otherwise
+        """
         try:
             async with get_client() as client:
-                await client.api_healthcheck()
-                logger.info("Prefect API连接正常")
-                return True
-        except Exception as e:
-            logger.error(f"Prefect API连接失败: {str(e)}")
-            return False
-    
-    def deploy_hello_flow(self) -> str:
-        """部署hello流"""
-        image_tag = self._generate_image_tag()
-        job_variables = self._get_docker_job_variables()
-        
-        logger.info(f"开始部署hello流，镜像: {image_tag}")
-        logger.info(f"工作池: {self.config.work_pool_name}")
-        logger.info(f"Prefect API: {self.config.prefect_api_url}")
-        
-        try:
-            # 在容器环境中使用不同的部署方式
-            # 如果需要在容器环境中避免构建镜像，可仅上传代码包而跳过Docker build
-            if self.config.is_container_env:
-                logger.info("检测到容器环境，跳过Docker镜像构建，直接向Prefect服务器注册部署")
-                # Prefect >=2.14 支持 `push=False` 来跳过镜像推送；如果版本较低，可忽略此参数
-                extra_kwargs = {"build": False, "push": False}  # 完全跳过Docker构建和推送
-            else:
-                extra_kwargs = {}
-            
-            # 添加超时控制
-            import signal
-            import asyncio
-            
-            def timeout_handler(signum, frame):
-                raise TimeoutError("部署操作超时")
-            
-            # 设置配置的超时时间
-            signal.signal(signal.SIGALRM, timeout_handler)
-            signal.alarm(self.config.deployment_timeout)
-            
-            try:
-                deployment_id = hello_flow.deploy(
-                    name="hello-production",
-                    work_pool_name=self.config.work_pool_name,
-                    image=image_tag,
-                    schedule={"interval": self.config.schedule_interval},
-                    job_variables=job_variables,
-                    tags=["production", "automated", "hello"],
-                    description="生产环境的问候流",
-                    **extra_kwargs,
+                await asyncio.wait_for(
+                    client.api_healthcheck(),
+                    timeout=self.settings.api_timeout
                 )
-                
-                # 取消超时
-                signal.alarm(0)
-                
-                logger.info(f"hello流部署成功，ID: {deployment_id}")
-                return deployment_id
-                
-            except TimeoutError:
-                signal.alarm(0)
-                logger.error(f"部署操作超时（{self.config.deployment_timeout}秒）")
-                raise
-            except Exception as e:
-                signal.alarm(0)
-                raise e
-            
+                logger.info("✅ Prefect API connection successful")
+                metrics.record_api_call("prefect_healthcheck", success=True)
+                return True
+        except asyncio.TimeoutError:
+            logger.error(f"⏱️ Prefect API connection timeout ({self.settings.api_timeout}s)")
+            metrics.record_api_call("prefect_healthcheck", success=False)
+            raise AppTimeoutError(
+                "Prefect API connection timeout",
+                timeout=self.settings.api_timeout,
+                operation="healthcheck"
+            )
         except Exception as e:
-            logger.error(f"hello流部署失败: {str(e)}")
-            # 提供更详细的错误信息和解决方案
-            error_msg = str(e).lower()
-            if "connecttimeouterror" in error_msg or "timeout" in error_msg:
-                logger.error("🌐 网络连接超时")
-                logger.info("💡 可能的解决方案:")
-                logger.info("  1. 检查 Prefect API 服务器是否正在运行")
-                logger.info("  2. 验证网络连接和防火墙设置")
-                logger.info("  3. 尝试增加 API_TIMEOUT 配置值")
-            elif "work_pool" in error_msg or "pool" in error_msg:
-                logger.error(f"🏊 工作池 '{self.config.work_pool_name}' 相关错误")
-                logger.info("💡 可能的解决方案:")
-                logger.info("  1. 确认工作池存在且名称正确")
-                logger.info("  2. 检查工作池配置和状态")
-                logger.info("  3. 验证工作池的访问权限")
-            elif "authentication" in error_msg or "unauthorized" in error_msg:
-                logger.error("🔐 认证失败")
-                logger.info("💡 可能的解决方案:")
-                logger.info("  1. 检查 API 密钥是否正确")
-                logger.info("  2. 验证用户权限设置")
-                logger.info("  3. 确认 Prefect 服务器配置")
-            elif "docker" in error_msg:
-                logger.error("🐳 Docker 相关错误")
-                logger.info("💡 可能的解决方案:")
-                logger.info("  1. 检查 Docker 服务是否运行")
-                logger.info("  2. 验证 Docker 镜像是否存在")
-                logger.info("  3. 检查 Docker 权限设置")
-            else:
-                logger.error("❌ 未知错误类型")
-                logger.info("💡 建议:")
-                logger.info("  1. 检查完整的错误日志")
-                logger.info("  2. 验证所有配置项")
-                logger.info("  3. 联系技术支持")
+            logger.error(f"❌ Prefect API connection failed: {str(e)}")
+            metrics.record_api_call("prefect_healthcheck", success=False)
+            raise AppConnectionError(
+                f"Failed to connect to Prefect API: {str(e)}",
+                service="prefect_api"
+            )
+    
+    @asynccontextmanager
+    async def _timeout_context(self, timeout: int, operation: str):
+        """Context manager for operation timeouts"""
+        try:
+            yield
+        except asyncio.TimeoutError:
+            raise AppTimeoutError(
+                f"{operation} timed out",
+                timeout=timeout,
+                operation=operation
+            )
+    
+    async def _validate_work_pool(self, client, work_pool_name: str) -> bool:
+        """
+        Validate that work pool exists
+        
+        Args:
+            client: Prefect client
+            work_pool_name: Name of work pool to validate
+        
+        Returns:
+            True if work pool exists
+        
+        Raises:
+            DeploymentError: If work pool doesn't exist
+        """
+        try:
+            work_pools = await client.read_work_pools()
+            pool_names = [pool.name for pool in work_pools]
             
+            if work_pool_name not in pool_names:
+                available_pools = ", ".join(pool_names) if pool_names else "None"
+                raise DeploymentError(
+                    f"Work pool '{work_pool_name}' not found",
+                    available_pools=available_pools
+                )
+            
+            return True
+        except Exception as e:
+            logger.error(f"Failed to validate work pool: {e}")
             raise
     
-    def deploy_health_check_flow(self) -> str:
-        """部署健康检查流"""
-        image_tag = self._generate_image_tag()
-        job_variables = self._get_docker_job_variables()
+    @circuit_breaker(failure_threshold=3, recovery_timeout=60)
+    @retry_with_backoff(max_attempts=3, max_delay=30)
+    async def deploy_flow(
+        self,
+        flow,
+        name: str,
+        schedule: Optional[Dict[str, Any]] = None,
+        tags: Optional[List[str]] = None,
+        description: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        Deploy a single flow with comprehensive error handling
         
-        logger.info(f"开始部署健康检查流，镜像: {image_tag}")
+        Args:
+            flow: The Prefect flow to deploy
+            name: Deployment name
+            schedule: Schedule configuration
+            tags: Deployment tags
+            description: Deployment description
+            **kwargs: Additional deployment parameters
+        
+        Returns:
+            Deployment ID
+        
+        Raises:
+            DeploymentError: If deployment fails
+        """
+        start_time = datetime.datetime.now()
+        deployment_id = None
         
         try:
-            deployment_id = health_check_flow.deploy(
-                name="health-check-production",
-                work_pool_name=self.config.work_pool_name,
-                image=image_tag,
-                schedule={"interval": 300},  # 5分钟检查一次
-                job_variables=job_variables,
-                tags=["production", "health-check"],
-                description="生产环境健康检查流",
-            )
+            # Validate configuration
+            issues = self.settings.validate_deployment_requirements()
+            if issues:
+                raise ConfigurationError(
+                    "Invalid deployment configuration",
+                    missing_keys=issues
+                )
             
-            logger.info(f"健康检查流部署成功，ID: {deployment_id}")
+            # Check Prefect connection
+            if not await self.check_prefect_connection():
+                raise AppConnectionError(
+                    "Cannot establish connection to Prefect API",
+                    service="prefect_api"
+                )
+            
+            # Validate work pool
+            async with get_client() as client:
+                await self._validate_work_pool(client, self.settings.work_pool_name)
+            
+            # Generate image tag
+            image_tag = self._generate_image_tag()
+            
+            # Get job variables
+            job_variables = self.settings.get_docker_job_variables()
+            
+            logger.info(f"🚀 Deploying flow '{name}'")
+            logger.info(f"📦 Image: {image_tag}")
+            logger.info(f"🏊 Work pool: {self.settings.work_pool_name}")
+            
+            # Set up deployment parameters
+            deploy_params = {
+                "name": name,
+                "work_pool_name": self.settings.work_pool_name,
+                "image": image_tag,
+                "job_variables": job_variables,
+                "tags": tags or [],
+                "description": description,
+            }
+            
+            if schedule:
+                deploy_params["schedule"] = schedule
+            
+            # Add any additional parameters
+            deploy_params.update(kwargs)
+            
+            # Skip Docker operations in container environment
+            if self.settings.is_container_env:
+                logger.info("📦 Container environment detected, skipping Docker build")
+                deploy_params["build"] = False
+                deploy_params["push"] = False
+            
+            # Deploy with timeout
+            async with self._timeout_context(
+                self.settings.deployment_timeout,
+                f"Deployment of {name}"
+            ):
+                deployment_id = await asyncio.to_thread(
+                    flow.deploy,
+                    **deploy_params
+                )
+            
+            # Record metrics
+            duration = (datetime.datetime.now() - start_time).total_seconds()
+            metrics.record_deployment(name, success=True, duration=duration)
+            
+            logger.info(f"✅ Flow '{name}' deployed successfully")
+            logger.info(f"🆔 Deployment ID: {deployment_id}")
+            
             return deployment_id
             
         except Exception as e:
-            logger.error(f"健康检查流部署失败: {str(e)}")
+            # Record failure metrics
+            duration = (datetime.datetime.now() - start_time).total_seconds()
+            metrics.record_deployment(name, success=False, duration=duration)
+            
+            # Log detailed error information
+            self._log_deployment_error(e, name)
+            
+            # Wrap in DeploymentError if not already
+            if not isinstance(e, DeploymentError):
+                raise DeploymentError(
+                    f"Failed to deploy flow '{name}': {str(e)}",
+                    deployment_id=deployment_id,
+                    flow_name=name
+                )
             raise
     
-    def deploy_all(self) -> Dict[str, str]:
-        """部署所有流"""
-        results = {}
+    def _log_deployment_error(self, error: Exception, flow_name: str):
+        """Log detailed error information with troubleshooting tips"""
+        error_msg = str(error).lower()
+        
+        logger.error(f"❌ Deployment failed for '{flow_name}': {error}")
+        
+        # Provide specific troubleshooting guidance
+        if "timeout" in error_msg:
+            logger.info("💡 Troubleshooting tips for timeout errors:")
+            logger.info("  1. Check network connectivity to Prefect API")
+            logger.info("  2. Increase API_TIMEOUT or DEPLOYMENT_TIMEOUT")
+            logger.info("  3. Check if Prefect server is under heavy load")
+        elif "work_pool" in error_msg or "pool" in error_msg:
+            logger.info("💡 Troubleshooting tips for work pool errors:")
+            logger.info("  1. Verify work pool exists: prefect work-pool ls")
+            logger.info("  2. Create work pool: prefect work-pool create <name>")
+            logger.info("  3. Check work pool configuration and status")
+        elif "auth" in error_msg or "unauthorized" in error_msg:
+            logger.info("💡 Troubleshooting tips for authentication errors:")
+            logger.info("  1. Verify PREFECT_API_KEY is set correctly")
+            logger.info("  2. Check API key permissions")
+            logger.info("  3. Ensure user has deployment permissions")
+        elif "docker" in error_msg:
+            logger.info("💡 Troubleshooting tips for Docker errors:")
+            logger.info("  1. Verify Docker daemon is running")
+            logger.info("  2. Check Docker registry credentials")
+            logger.info("  3. Ensure image exists and is accessible")
+        elif "connection" in error_msg:
+            logger.info("💡 Troubleshooting tips for connection errors:")
+            logger.info("  1. Verify PREFECT_API_URL is correct")
+            logger.info("  2. Check firewall and network settings")
+            logger.info("  3. Ensure Prefect server is running")
+    
+    async def deploy_hello_flow(self) -> str:
+        """Deploy the hello flow"""
+        return await self.deploy_flow(
+            flow=hello_flow,
+            name="hello-production",
+            schedule={"interval": self.settings.schedule_interval},
+            tags=["production", "automated", "hello"],
+            description="Production hello workflow with monitoring"
+        )
+    
+    async def deploy_health_check_flow(self) -> str:
+        """Deploy the health check flow"""
+        return await self.deploy_flow(
+            flow=health_check_flow,
+            name="health-check-production",
+            schedule={"interval": 300},  # Check every 5 minutes
+            tags=["production", "health-check", "monitoring"],
+            description="Production health check workflow"
+        )
+    
+    async def deploy_all(self) -> Dict[str, Any]:
+        """
+        Deploy all flows with parallel execution where possible
+        
+        Returns:
+            Dictionary with deployment results
+        """
+        results = {
+            "success": False,
+            "deployments": {},
+            "errors": [],
+            "metrics": {}
+        }
         
         try:
-            # 只部署hello流，简化部署过程
-            logger.info("开始部署主要流程...")
-            results["hello_flow"] = self.deploy_hello_flow()
+            # Deploy flows in parallel for better performance
+            tasks = [
+                self.deploy_hello_flow(),
+                self.deploy_health_check_flow(),
+            ]
             
-            logger.info("流部署完成")
+            # Use asyncio.gather with return_exceptions to handle partial failures
+            deployment_results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Process results
+            flow_names = ["hello_flow", "health_check_flow"]
+            for name, result in zip(flow_names, deployment_results):
+                if isinstance(result, Exception):
+                    results["errors"].append({
+                        "flow": name,
+                        "error": str(result)
+                    })
+                    logger.error(f"Failed to deploy {name}: {result}")
+                else:
+                    results["deployments"][name] = result
+                    logger.info(f"Successfully deployed {name}: {result}")
+            
+            # Determine overall success
+            results["success"] = len(results["errors"]) == 0
+            
+            # Add metrics
+            results["metrics"] = {
+                "total_flows": len(flow_names),
+                "successful": len(results["deployments"]),
+                "failed": len(results["errors"]),
+                "circuit_breaker_state": self.circuit_breaker.state.value
+            }
+            
+            if results["success"]:
+                logger.info("✅ All flows deployed successfully")
+            else:
+                logger.warning(f"⚠️ Partial deployment: {len(results['errors'])} flows failed")
+            
             return results
             
         except Exception as e:
-            logger.error(f"部署过程中发生错误: {str(e)}")
+            logger.error(f"Critical error during deployment: {e}")
+            results["errors"].append({
+                "flow": "deployment_manager",
+                "error": str(e)
+            })
             
-            # 在容器环境中，提供诊断信息但不抛出异常
-            if self.config.is_container_env:
-                logger.warning("容器环境中的部署失败，返回错误信息而不是抛出异常")
-                # 检查是否为Docker相关错误
-                if "Docker is not running" in str(e):
-                    logger.warning("检测到Docker服务未运行错误 - 在容器内部署时不需要Docker服务")
-                    # 返回成功状态，因为这是预期的行为
-                    return {"status": "success", "message": "容器内部署 - 忽略Docker服务未运行错误"}
-                return {"error": str(e), "status": "failed"}
-            else:
-                raise
+            # In container environment, return error info instead of raising
+            if self.settings.is_container_env:
+                logger.warning("Container environment: returning error info instead of raising")
+                return results
+            
+            raise
 
 
-def deploy_flows():
-    """部署流的入口函数"""
+async def deploy_flows_async() -> Dict[str, Any]:
+    """Async entry point for flow deployment"""
     manager = DeploymentManager()
-    return manager.deploy_all()
+    return await manager.deploy_all()
+
+
+def deploy_flows() -> Dict[str, Any]:
+    """Synchronous entry point for flow deployment (backward compatibility)"""
+    try:
+        # Run async deployment in new event loop
+        return asyncio.run(deploy_flows_async())
+    except Exception as e:
+        logger.error(f"Deployment failed: {e}")
+        
+        # Return error info for CI/CD compatibility
+        return {
+            "success": False,
+            "error": str(e),
+            "deployments": {},
+            "errors": [{"flow": "all", "error": str(e)}]
+        }

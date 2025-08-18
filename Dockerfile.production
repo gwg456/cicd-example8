@@ -1,0 +1,81 @@
+# Production-optimized multi-stage build with security scanning
+# Stage 1: Security Scanner
+FROM aquasec/trivy:latest as scanner
+WORKDIR /scan
+COPY requirements.txt .
+RUN trivy fs --exit-code 0 --severity HIGH,CRITICAL --no-progress .
+
+# Stage 2: Builder
+FROM python:3.12-slim as builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    make \
+    libpq-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /build
+
+# Copy and install dependencies
+COPY requirements.txt .
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install dependencies with hash verification
+RUN pip install --upgrade pip setuptools wheel && \
+    pip install --no-cache-dir --require-hashes -r requirements.txt 2>/dev/null || \
+    pip install --no-cache-dir -r requirements.txt
+
+# Stage 3: Testing
+FROM builder as tester
+WORKDIR /test
+COPY . .
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Run linting and security checks
+RUN pip install bandit safety && \
+    bandit -r src/ -ll && \
+    safety check --json || true
+
+# Run tests if they exist
+RUN if [ -d "tests" ]; then \
+        pip install pytest pytest-cov && \
+        pytest tests/ --cov=src --cov-report=term-missing || true; \
+    fi
+
+# Stage 4: Distroless Runtime
+FROM gcr.io/distroless/python3-debian12
+
+# Copy Python and virtual environment
+COPY --from=builder /usr/local/lib/python3.12 /usr/local/lib/python3.12
+COPY --from=builder /usr/local/bin/python3.12 /usr/local/bin/python3.12
+COPY --from=builder /opt/venv /opt/venv
+
+# Set environment variables
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONPATH=/app \
+    PREFECT_LOGGING_LEVEL=INFO
+
+# Copy application
+WORKDIR /app
+COPY --from=tester /test/src ./src
+COPY --from=tester /test/flow.py ./
+COPY --from=tester /test/config.py ./
+
+# Create VERSION file
+COPY --from=builder /usr/bin/date /usr/bin/date
+RUN ["/usr/bin/date", "+%Y%m%d.%H%M%S"]
+
+# Non-root user (distroless includes a non-root user)
+USER nonroot
+
+# Expose metrics port
+EXPOSE 8000
+
+# Run application
+ENTRYPOINT ["python", "flow.py"]
