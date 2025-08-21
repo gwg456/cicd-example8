@@ -24,7 +24,7 @@
 
 ```bash
 git clone <repository-url>
-cd cicd-example
+cd cicd-example8
 ```
 
 ### 2. 安装依赖
@@ -39,6 +39,7 @@ pip install -r requirements.txt
 
 ```bash
 # Prefect 配置
+# 本地开发可使用 http://localhost:4200/api
 PREFECT_API_URL=http://172.31.0.55:4200/api
 WORK_POOL_NAME=my-docker-pool2
 
@@ -48,6 +49,10 @@ IMAGE_TAG=v202501010000
 
 # 部署模式
 DEPLOY_MODE=false
+
+# 超时（可选）
+API_TIMEOUT=300
+DEPLOYMENT_TIMEOUT=60
 ```
 
 ### 4. 配置 GitHub Secrets
@@ -104,7 +109,7 @@ docker build -f Dockerfile.with-docker -t cicd-example:with-docker .
 
 # 运行容器
 docker run --rm \
-  -e PREFECT_API_URL=http://172.31.0.55:4200/api \
+  -e PREFECT_API_URL=${PREFECT_API_URL:-http://172.31.0.55:4200/api} \
   -e DEPLOY_MODE=true \
   cicd-example
 ```
@@ -115,12 +120,12 @@ docker run --rm \
 
 1. 构建 Docker 镜像
 2. 推送到 GitHub Container Registry
-3. 自动部署到 Prefect 服务器
+3. 自动部署到 Prefect 服务器（容器环境将跳过 Docker 构建/推送，仅注册部署）
 
 ## 📁 项目结构
 
 ```
-cicd-example/
+cicd-example8/
 ├── .github/
 │   └── workflows/
 │       └── deploy-prefect-flow.yaml  # CI/CD 配置
@@ -143,13 +148,12 @@ cicd-example/
 
 ### 修改工作流
 
-编辑 `flow.py` 中的 `hello()` 函数来自定义工作流逻辑：
+编辑 `src/flows.py` 中的 `hello_flow()` 函数来自定义工作流逻辑：
 
 ```python
-@flow(log_prints=True)
-def hello():
-    """自定义工作流逻辑"""
-    print("你的自定义工作流")
+@flow(name="hello-flow", log_prints=True)
+def hello_flow(name: str = "World") -> str:
+    print(f"Hello {name}!")
     # 添加你的业务逻辑
 ```
 
@@ -176,16 +180,18 @@ schedule={"cron": "0 9 * * *"}  # 每天上午9点
    - 检查 `PREFECT_API_URL` 是否正确
    - 确认 Prefect 服务器正在运行
    - 检查网络连接
+   - 如果在中国大陆，检查代理或镜像加速
 
 2. **Docker 构建失败**
    - 检查 Dockerfile 语法
    - 确认基础镜像可用
-   - 检查网络连接
+   - 检查网络连接（可使用 `Dockerfile.with-docker` 或配置镜像源）
 
 3. **部署超时**
    - 检查 Prefect 服务器响应时间
    - 增加超时配置
    - 检查网络延迟
+   - Windows/macOS 环境已采用跨平台超时控制，无需 SIGALRM
 
 ### 日志查看
 

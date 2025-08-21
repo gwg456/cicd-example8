@@ -1,0 +1,4 @@
+# 此文件用于存放 tools 目录中脚本的依赖
+# 使用 pip install -r tools/requirements-tools.txt 进行安装
+
+pdfminer.six>=20221105

@@ -1,0 +1,39 @@
+# 开发环境依赖
+# 使用 pip install -r requirements-dev.txt 安装
+# 或者使用 pip install -e ".[dev]" 从 pyproject.toml 安装
+
+# 代码质量工具
+ruff>=0.0.290
+mypy>=1.5.0
+black>=23.7.0
+isort>=5.12.0
+
+# 测试工具
+pytest>=7.4.0
+pytest-cov>=4.1.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+pytest-xdist>=3.3.0
+
+# 开发工具
+pre-commit>=3.4.0
+commitizen>=3.10.0
+
+# 类型检查
+types-requests>=2.31.0
+
+# 安全工具
+bandit>=1.7.5
+safety>=2.3.0
+
+# 文档工具
+mkdocs>=1.5.0
+mkdocs-material>=9.2.0
+mkdocstrings[python]>=0.23.0
+
+# 调试工具
+ipdb>=0.13.13
+rich>=13.0.0
+
+# 性能分析
+py-spy>=0.3.14

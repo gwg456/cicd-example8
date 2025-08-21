@@ -43,3 +43,22 @@ def health_check_flow() -> dict:
         "timestamp": datetime.datetime.now().isoformat(),
         "message": "Flow is running successfully"
     }
+
+
+@task(name="process-pdf-task")
+def process_pdf(file_path: str = "example.pdf") -> str:
+    """模拟处理PDF文件的任务"""
+    logger.info(f"开始处理PDF文件: {file_path}")
+    # 在实际应用中，这里会调用 tools/extract_pdf_text.py 的逻辑
+    processing_time = round(time.time() % 5 + 1)  # 模拟1-6秒的处理时间
+    time.sleep(processing_time)
+    result = f"文件 '{file_path}' 处理完成，耗时 {processing_time} 秒。"
+    logger.info(result)
+    return result
+
+
+@flow(name="process-pdf-flow", log_prints=True)
+def process_pdf_flow():
+    """处理PDF文件的工作流"""
+    print("启动PDF处理流程...")
+    process_pdf("通信网络安全防护公益培训.pdf")

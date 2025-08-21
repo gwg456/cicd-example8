@@ -7,6 +7,23 @@
 import os
 from dataclasses import dataclass
 from typing import Optional
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    # 允许在未安装 python-dotenv 时正常工作
+    pass
+
+
+def _get_env_bool(name: str, default: bool = False) -> bool:
+    """更健壮的布尔环境变量解析。
+
+    兼容 true/1/yes/on 与 false/0/no/off（大小写不敏感）。
+    """
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 @dataclass
@@ -29,26 +46,14 @@ class Config:
     # 应用配置
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
     environment: str = os.getenv("ENVIRONMENT", "development")
-    deploy_mode: bool = os.getenv("DEPLOY_MODE", "false").lower() == "true"
+    deploy_mode: bool = _get_env_bool("DEPLOY_MODE", False)
     
     # 调度配置
     schedule_interval: int = int(os.getenv("SCHEDULE_INTERVAL", "3600"))  # 默认1小时
     
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署超时时间
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间
+    # 超时配置（向后兼容 PREFECT_API_TIMEOUT 与 API_TIMEOUT 两种命名）
+    api_timeout: int = int(os.getenv("API_TIMEOUT", os.getenv("PREFECT_API_TIMEOUT", "300")))
+    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))
     
     @property
     def full_image_name(self) -> str:
@@ -71,8 +76,11 @@ class Config:
         """应用 Prefect 相关的环境变量设置"""
         if self.prefect_api_url:
             os.environ["PREFECT_API_URL"] = self.prefect_api_url
-            # 确保其他 Prefect 相关的环境变量也被设置
-            os.environ["PREFECT_LOGGING_LEVEL"] = self.log_level
+        # 确保其他 Prefect 相关的环境变量也被设置
+        os.environ["PREFECT_LOGGING_LEVEL"] = self.log_level
+        # 为客户端请求设置合理超时
+        os.environ["PREFECT_API_RESPONSE_TIMEOUT"] = str(self.api_timeout)
+        os.environ["PREFECT_API_REQUEST_TIMEOUT"] = str(self.api_timeout)
     
     def validate_required_settings(self) -> list[str]:
         """
@@ -93,7 +101,7 @@ class Config:
         
         # 验证超时配置的合理性
         if self.api_timeout <= 0:
-            missing.append("PREFECT_API_TIMEOUT (必须大于0)")
+            missing.append("API_TIMEOUT/PREFECT_API_TIMEOUT (必须大于0)")
         if self.deployment_timeout <= 0:
             missing.append("DEPLOYMENT_TIMEOUT (必须大于0)")
         

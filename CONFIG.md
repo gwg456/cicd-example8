@@ -19,7 +19,7 @@
 - `SCHEDULE_INTERVAL`: 定时任务执行间隔，单位秒 (默认: 3600)
 
 ### 超时配置
-- `PREFECT_API_TIMEOUT`: Prefect API 请求超时时间，单位秒 (默认: 300)
+- `API_TIMEOUT` 或 `PREFECT_API_TIMEOUT`: Prefect API 请求超时时间，单位秒 (默认: 300)
 - `DEPLOYMENT_TIMEOUT`: 部署操作超时时间，单位秒 (默认: 60)
 
 ## 配置示例

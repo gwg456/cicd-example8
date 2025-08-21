@@ -1,4 +1,13 @@
-prefect==3.4.8
-prefect-docker==0.6.6
+# 生产环境依赖
+# 这个文件保持向后兼容性，推荐使用 pyproject.toml 进行依赖管理
+# 安装方式: pip install -e . 或 pip install -e ".[dev]"
+
+# 核心依赖
+prefect>=3.4.8,<4.0.0
+prefect-docker>=0.6.6,<1.0.0
 httpx>=0.24.0
+python-dotenv>=1.0.1
+pydantic>=2.0.0
+structlog>=23.0.0
+rich>=13.0.0
 
