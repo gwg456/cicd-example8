@@ -34,21 +34,10 @@ class Config:
     # 调度配置
     schedule_interval: int = int(os.getenv("SCHEDULE_INTERVAL", "3600"))  # 默认1小时
     
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署超时时间
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间
+    # 超时配置（仅此一处为准）
+    # 使用 PREFECT_API_TIMEOUT 控制 Prefect API 请求超时；DEPLOYMENT_TIMEOUT 控制部署超时
+    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", os.getenv("API_TIMEOUT", "300")))
+    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))
     
     @property
     def full_image_name(self) -> str:
@@ -73,6 +62,9 @@ class Config:
             os.environ["PREFECT_API_URL"] = self.prefect_api_url
             # 确保其他 Prefect 相关的环境变量也被设置
             os.environ["PREFECT_LOGGING_LEVEL"] = self.log_level
+            # 统一 API 超时到 prefact 环境变量
+            os.environ["PREFECT_API_REQUEST_TIMEOUT"] = str(self.api_timeout)
+            os.environ["PREFECT_API_RESPONSE_TIMEOUT"] = str(self.api_timeout)
     
     def validate_required_settings(self) -> list[str]:
         """

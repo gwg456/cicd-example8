@@ -4,6 +4,7 @@
 import sys
 import os
 import logging
+import argparse
 
 # 添加当前目录到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -30,9 +31,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Prefect CI/CD entrypoint")
+    parser.add_argument("--deploy", action="store_true", help="以部署模式运行")
+    parser.add_argument("--run", action="store_true", help="直接运行flow")
+    parser.add_argument("--name", type=str, default="World", help="hello_flow 的 name 参数")
+    return parser.parse_args()
+
+
 def main():
     """主函数"""
-    if config.deploy_mode:
+    args = parse_args()
+
+    # CLI 优先于环境变量的 deploy_mode
+    effective_deploy_mode = args.deploy or (config.deploy_mode and not args.run)
+
+    if effective_deploy_mode:
         logger.info("运行部署模式")
         logger.info(f"Prefect API URL: {config.prefect_api_url}")
         logger.info(f"工作池名称: {config.work_pool_name}")
@@ -89,7 +103,7 @@ def main():
     else:
         logger.info("运行流执行模式")
         # 直接运行hello流
-        result = hello_flow()
+        result = hello_flow(args.name)
         logger.info(f"流执行完成: {result}")
 
 

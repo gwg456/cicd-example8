@@ -92,6 +92,12 @@ class DeploymentManager:
         logger.info(f"Prefect API: {self.config.prefect_api_url}")
         
         try:
+            # 在部署前检查与 Prefect API 的连通性
+            import asyncio
+            is_ok = asyncio.run(self.check_prefect_connection())
+            if not is_ok:
+                raise RuntimeError("无法连接到 Prefect API，已停止部署")
+            
             # 在容器环境中使用不同的部署方式
             # 如果需要在容器环境中避免构建镜像，可仅上传代码包而跳过Docker build
             if self.config.is_container_env:

@@ -8,13 +8,13 @@ from prefect import flow, task
 logger = logging.getLogger(__name__)
 
 
-@task(name="greeting-task")
+@task(name="greeting-task", retries=2, retry_delay_seconds=5)
 def generate_greeting(name: str = "World") -> str:
     """生成问候语的任务"""
     return f"Hello {name}! This run was scheduled via Interval!"
 
 
-@task(name="sleep-task")
+@task(name="sleep-task", retries=1, retry_delay_seconds=2)
 def sleep_task(duration: int = 20) -> None:
     """休眠任务"""
     logger.info(f"Sleeping for {duration} seconds...")
