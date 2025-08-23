@@ -1,0 +1,72 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+      - DATABASE_URL=sqlite:///diet_planner.db
+    volumes:
+      - ./backend:/app
+      - backend_data:/app/instance
+    depends_on:
+      - db
+    networks:
+      - diet-planner-network
+    restart: unless-stopped
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - diet-planner-network
+    restart: unless-stopped
+
+  # 数据库服务（生产环境可使用PostgreSQL）
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: diet_planner
+      POSTGRES_USER: diet_user
+      POSTGRES_PASSWORD: diet_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - diet-planner-network
+    restart: unless-stopped
+
+  # Redis缓存（可选，用于会话管理）
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - diet-planner-network
+    restart: unless-stopped
+
+volumes:
+  backend_data:
+  postgres_data:
+  redis_data:
+
+networks:
+  diet-planner-network:
+    driver: bridge
