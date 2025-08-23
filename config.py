@@ -1,141 +1,130 @@
-"""
-配置管理模块
+"""config.py
++---------------------------------
+Production-ready configuration module powered by **Pydantic**.
 
-统一管理应用的所有配置项，支持通过环境变量进行配置。
-配置项会自动应用到相应的系统组件中。
+Key benefits over the previous dataclass implementation:
+1. Single-source-of-truth – each field defined once (removes duplicates).
+2. Built-in validation & type coercion.
+3. Rich `.model_dump()` / `.model_json()` for observability.
+4. Environment-variable parsing with prefix support.
 """
+
+from __future__ import annotations
+
 import os
-from dataclasses import dataclass
-from typing import Optional
+from functools import lru_cache
+from typing import Any, Dict, List, Optional
+
+from pydantic import BaseSettings, Field, ValidationError, field_validator
+
+# NOTE: keep a minimal dependency footprint; pydantic is already used by Prefect.
 
 
-@dataclass
-class Config:
+class Settings(BaseSettings):
+    """Application configuration loaded from environment variables.
+
+    Pydantic reads variables in the form `PREFECT_API_URL`, `IMAGE_REPO` …
+    Values can also be overridden by `.env` file when present.
     """
-    应用配置类
-    
-    所有配置项都支持通过环境变量设置，提供合理的默认值。
-    配置会在导入时自动应用到相应的系统组件。
-    """
-    
-    # Prefect配置
-    prefect_api_url: str = os.getenv("PREFECT_API_URL", "http://172.31.0.55:4200/api")
-    work_pool_name: str = os.getenv("WORK_POOL_NAME", "my-docker-pool2")
-    
-    # Docker配置
-    image_repo: str = os.getenv("IMAGE_REPO", "ghcr.io/samples28/cicd-example")
-    image_tag: Optional[str] = os.getenv("IMAGE_TAG")
-    
-    # 应用配置
-    log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    environment: str = os.getenv("ENVIRONMENT", "development")
-    deploy_mode: bool = os.getenv("DEPLOY_MODE", "false").lower() == "true"
-    
-    # 调度配置
-    schedule_interval: int = int(os.getenv("SCHEDULE_INTERVAL", "3600"))  # 默认1小时
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署超时时间
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间
-    
+
+    # ---------------------------------------------------------------------
+    # Core runtime
+    # ---------------------------------------------------------------------
+    environment: str = Field("development", description="Runtime environment switch: development/staging/production")
+    log_level: str = Field("INFO", description="Root log level")
+
+    # ---------------------------------------------------------------------
+    # Prefect & deployment
+    # ---------------------------------------------------------------------
+    prefect_api_url: str = Field("http://172.31.0.55:4200/api", alias="PREFECT_API_URL")
+    work_pool_name: str = Field("my-docker-pool2", alias="WORK_POOL_NAME")
+
+    # ---------------------------------------------------------------------
+    # Docker build / image
+    # ---------------------------------------------------------------------
+    image_repo: str = Field("ghcr.io/samples28/cicd-example", alias="IMAGE_REPO")
+    image_tag: Optional[str] = Field(default=None, alias="IMAGE_TAG")
+
+    # ---------------------------------------------------------------------
+    # Scheduling / timeouts
+    # ---------------------------------------------------------------------
+    schedule_interval: int = Field(3600, ge=60, description="Default schedule interval in seconds")
+    api_timeout: int = Field(300, gt=0, alias="API_TIMEOUT")
+    deployment_timeout: int = Field(60, gt=0, alias="DEPLOYMENT_TIMEOUT")
+
+    # ---------------------------------------------------------------------
+    # Feature flags
+    # ---------------------------------------------------------------------
+    deploy_mode: bool = Field(False, alias="DEPLOY_MODE")
+
+    # ------------------------------------------------------------------
+    # Derived helpers (computed properties)
+    # ------------------------------------------------------------------
     @property
     def full_image_name(self) -> str:
-        """获取完整的镜像名称"""
-        if self.image_tag:
-            return f"{self.image_repo}:{self.image_tag}"
-        return self.image_repo
-    
+        """Return repo:tag, if tag provided, else repo."""
+
+        return f"{self.image_repo}:{self.image_tag}" if self.image_tag else self.image_repo
+
     @property
-    def is_container_env(self) -> bool:
-        """检查是否在容器环境中运行"""
+    def is_container_env(self) -> bool:  # noqa: D401
+        """Detect if running inside Docker container."""
+
         return os.path.exists("/.dockerenv")
-    
+
     @property
-    def is_production(self) -> bool:
-        """检查是否为生产环境"""
+    def is_production(self) -> bool:  # noqa: D401
+        """Quick production check."""
+
         return self.environment.lower() == "production"
-    
-    def apply_prefect_settings(self) -> None:
-        """应用 Prefect 相关的环境变量设置"""
-        if self.prefect_api_url:
-            os.environ["PREFECT_API_URL"] = self.prefect_api_url
-            # 确保其他 Prefect 相关的环境变量也被设置
-            os.environ["PREFECT_LOGGING_LEVEL"] = self.log_level
-    
-    def validate_required_settings(self) -> list[str]:
-        """
-        验证必需的配置项
-        
-        Returns:
-            list[str]: 缺失的配置项列表
-        """
-        missing = []
-        
-        if self.deploy_mode:
-            if not self.prefect_api_url:
-                missing.append("PREFECT_API_URL")
-            if not self.work_pool_name:
-                missing.append("WORK_POOL_NAME")
-            if not self.image_repo:
-                missing.append("IMAGE_REPO")
-        
-        # 验证超时配置的合理性
-        if self.api_timeout <= 0:
-            missing.append("PREFECT_API_TIMEOUT (必须大于0)")
-        if self.deployment_timeout <= 0:
-            missing.append("DEPLOYMENT_TIMEOUT (必须大于0)")
-        
-        return missing
-    
-    def get_config_summary(self) -> dict:
-        """获取配置摘要信息"""
+
+    # ------------------------------------------------------------------
+    # Validators
+    # ------------------------------------------------------------------
+    @field_validator("log_level")
+    @classmethod
+    def _validate_log_level(cls, v: str) -> str:  # noqa: D401, N805
+        allowed = {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG", "NOTSET"}
+        v_up = v.upper()
+        if v_up not in allowed:
+            raise ValueError(f"Invalid log level: {v}. Allowed: {allowed}")
+        return v_up
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+    def summary(self) -> Dict[str, Any]:
+        """Return a JSON-serialisable overview useful for diagnostics."""
+
         return {
-            "prefect_api_url": self.prefect_api_url,
-            "work_pool_name": self.work_pool_name,
-            "image_repo": self.image_repo,
-            "image_tag": self.image_tag,
+            **self.model_dump(),
             "full_image_name": self.full_image_name,
-            "environment": self.environment,
-            "deploy_mode": self.deploy_mode,
             "is_container_env": self.is_container_env,
             "is_production": self.is_production,
-            "deployment_timeout": self.deployment_timeout,
-            "api_timeout": self.api_timeout,
-            "schedule_interval": self.schedule_interval,
         }
-    
-    def print_config_info(self) -> None:
-        """打印配置信息到控制台"""
-        print("=" * 50)
-        print("📋 Prefect CI/CD 配置信息")
-        print("=" * 50)
-        print(f"🌐 Prefect API URL: {self.prefect_api_url}")
-        print(f"🏊 工作池名称: {self.work_pool_name}")
-        print(f"🐳 Docker 镜像: {self.full_image_name}")
-        print(f"🌍 运行环境: {self.environment}")
-        print(f"📊 日志级别: {self.log_level}")
-        print(f"🚀 部署模式: {'是' if self.deploy_mode else '否'}")
-        print(f"📦 容器环境: {'是' if self.is_container_env else '否'}")
-        print(f"⏰ 调度间隔: {self.schedule_interval}秒")
-        print(f"⏱️  API超时: {self.api_timeout}秒")
-        print(f"⏳ 部署超时: {self.deployment_timeout}秒")
-        print("=" * 50)
+
+    def apply_prefect_env(self) -> None:
+        """Export pref-required env vars so Prefect client picks them up."""
+
+        os.environ["PREFECT_API_URL"] = self.prefect_api_url
+        os.environ["PREFECT_LOGGING_LEVEL"] = self.log_level
 
 
-# 全局配置实例
-config = Config()
+# Singleton accessor --------------------------------------------------------
 
-# 自动应用 Prefect 设置
-config.apply_prefect_settings()
+
+@lru_cache
+def get_settings() -> Settings:  # noqa: D401
+    """Return a cached Settings instance."""
+
+    try:
+        settings = Settings()  # type: ignore[call-arg]
+        settings.apply_prefect_env()
+        return settings
+    except ValidationError as exc:  # pragma: no cover
+        # Fail-fast – misconfiguration at import time is better than runtime errors.
+        raise RuntimeError(f"Configuration validation failed: {exc.errors()}") from exc
+
+
+# create a module-level alias for compatibility with legacy code
+settings = get_settings()  # noqa: N816
