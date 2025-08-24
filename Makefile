@@ -25,6 +25,9 @@ help:
 	@echo "  validate          - 验证配置"
 	@echo "  config-summary    - 显示配置摘要"
 	@echo "  test-connection   - 测试 Prefect 连接"
+	@echo "  test              - 运行单元测试"
+	@echo "  test-coverage     - 运行测试并生成覆盖率报告"
+	@echo "  lint              - 代码质量检查"
 	@echo "  status            - 检查项目状态"
 	@echo "  check             - 完整的项目检查"
 
@@ -93,6 +96,19 @@ config-summary:
 test-connection:
 	python -c "import asyncio; from src.deployment import DeploymentManager; asyncio.run(DeploymentManager().check_prefect_connection())"
 
+# 运行测试
+test:
+	python -m pytest tests/ -v
+
+# 运行测试并生成覆盖率报告
+test-coverage:
+	python -m pytest tests/ -v --cov=src --cov=config --cov-report=term-missing --cov-report=html
+
+# 代码质量检查
+lint:
+	python -c "import ast; [ast.parse(open(f).read()) for f in ['config.py', 'flow.py'] + [f'src/{f}' for f in ['flows.py', 'deployment.py']] if __import__('os').path.exists(f)]"
+	@echo "✅ 语法检查通过"
+
 # 完整的项目检查
-check: validate config-summary status
+check: validate config-summary lint test status
 	@echo "✅ 项目检查完成"

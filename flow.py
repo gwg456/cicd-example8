@@ -1,11 +1,31 @@
 """
-主入口文件 - 保持向后兼容性
+主入口文件
+
+这是项目的主要入口点，负责协调流的执行和部署。
+支持两种运行模式：
+1. 流执行模式：直接运行工作流
+2. 部署模式：将工作流部署到Prefect服务器
+
+环境变量:
+    DEPLOY_MODE: 设置为"true"启用部署模式，默认为"false"
+    PREFECT_API_URL: Prefect服务器API地址
+    WORK_POOL_NAME: 工作池名称
+    IMAGE_REPO: Docker镜像仓库
+    LOG_LEVEL: 日志级别（DEBUG, INFO, WARNING, ERROR）
+
+Usage:
+    # 直接运行流
+    python flow.py
+    
+    # 部署模式
+    DEPLOY_MODE=true python flow.py
 """
 import sys
 import os
 import logging
+from typing import NoReturn
 
-# 添加当前目录到Python路径
+# 添加当前目录到Python路径，确保模块导入正常工作
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import config
@@ -30,8 +50,19 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def main():
-    """主函数"""
+def main() -> None:
+    """
+    主函数 - 应用程序入口点
+    
+    根据配置决定运行模式：
+    - 部署模式：将流部署到Prefect服务器，支持定时调度
+    - 执行模式：直接在本地运行流
+    
+    在容器环境中运行时，会自动处理部署错误以确保CI/CD流程不中断。
+    
+    Raises:
+        SystemExit: 当配置验证失败或部署在非容器环境中失败时
+    """
     if config.deploy_mode:
         logger.info("运行部署模式")
         logger.info(f"Prefect API URL: {config.prefect_api_url}")
