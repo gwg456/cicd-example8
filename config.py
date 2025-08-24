@@ -5,8 +5,9 @@
 配置项会自动应用到相应的系统组件中。
 """
 import os
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, List, Dict, Any
+import logging
 
 
 @dataclass
@@ -38,18 +39,6 @@ class Config:
     api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
     deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
     
-    # 超时配置
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    api_timeout: int = int(os.getenv("PREFECT_API_TIMEOUT", "300"))  # API请求超时时间（秒）
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署操作超时时间（秒）
-    
-    # 超时配置
-    deployment_timeout: int = int(os.getenv("DEPLOYMENT_TIMEOUT", "60"))  # 部署超时时间
-    api_timeout: int = int(os.getenv("API_TIMEOUT", "300"))  # API请求超时时间
-    
     @property
     def full_image_name(self) -> str:
         """获取完整的镜像名称"""
@@ -74,12 +63,12 @@ class Config:
             # 确保其他 Prefect 相关的环境变量也被设置
             os.environ["PREFECT_LOGGING_LEVEL"] = self.log_level
     
-    def validate_required_settings(self) -> list[str]:
+    def validate_required_settings(self) -> List[str]:
         """
         验证必需的配置项
         
         Returns:
-            list[str]: 缺失的配置项列表
+            List[str]: 缺失的配置项列表
         """
         missing = []
         
@@ -96,8 +85,21 @@ class Config:
             missing.append("PREFECT_API_TIMEOUT (必须大于0)")
         if self.deployment_timeout <= 0:
             missing.append("DEPLOYMENT_TIMEOUT (必须大于0)")
+        if self.schedule_interval <= 0:
+            missing.append("SCHEDULE_INTERVAL (必须大于0)")
         
         return missing
+    
+    def validate_network_settings(self) -> bool:
+        """验证网络相关配置"""
+        if self.deploy_mode and self.prefect_api_url:
+            try:
+                from urllib.parse import urlparse
+                parsed = urlparse(self.prefect_api_url)
+                return all([parsed.scheme, parsed.netloc])
+            except Exception:
+                return False
+        return True
     
     def get_config_summary(self) -> dict:
         """获取配置摘要信息"""

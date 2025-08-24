@@ -1,4 +1,6 @@
 prefect==3.4.8
 prefect-docker==0.6.6
 httpx>=0.24.0
-
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.0.0
